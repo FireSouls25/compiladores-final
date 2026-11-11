@@ -1,0 +1,18 @@
+# misc.mb - types, if/else, floats, bools, strings
+fn max2(a: int, b: int) -> int {
+  if (a > b) {
+    return a;
+  } else {
+    return b;
+  }
+}
+
+let m: int = max2(3, 7);
+print(m);
+let f = 1.5 + 2;
+print(f);
+let s: str = "ab" * 3;
+print(s);
+print(len(s));
+let ok: bool = not False and True;
+print(ok);
