@@ -95,18 +95,51 @@ def fold_constants(code: list[Instr]) -> list[Instr]:
 
 
 def remove_unreachable(code: list[Instr]) -> list[Instr]:
-    out: list[Instr] = []
-    dead = False
-    for ins in code:
-        if dead:
-            if ins.op in ("label", "func_begin", "func_end"):
-                dead = False
-            else:
-                continue
-        out.append(ins)
-        if ins.op in ("goto", "return"):
-            dead = True
-    return out
+    """Remove instructions that no control-flow path can reach.
+
+    Every function body is a root (it may be called at any time), top-level
+    code starts at index 0, and `ifFalse`/`goto` add their label as an edge.
+    """
+    if not code:
+        return code
+    labels = {ins.a: i for i, ins in enumerate(code) if ins.op == "label"}
+    func_end: dict[int, int] = {}
+    for i, ins in enumerate(code):
+        if ins.op == "func_begin":
+            j = i + 1
+            while j < len(code) and code[j].op != "func_end":
+                j += 1
+            func_end[i] = j
+
+    roots = [0]
+    for i, ins in enumerate(code):
+        if ins.op == "func_begin":
+            roots.append(i)          # keep the marker itself
+            roots.append(i + 1)      # body entry
+            if i in func_end:
+                roots.append(func_end[i])  # always keep its matching func_end
+
+    reachable: set[int] = set()
+    work = list(roots)
+    while work:
+        i = work.pop()
+        if i < 0 or i >= len(code) or i in reachable:
+            continue
+        reachable.add(i)
+        ins = code[i]
+        if ins.op == "goto":
+            work.append(labels.get(ins.a, i + 1))
+        elif ins.op == "ifFalse":
+            work.append(labels.get(ins.b, i + 1))
+            work.append(i + 1)
+        elif ins.op in ("return", "func_end"):
+            pass  # no fallthrough
+        elif ins.op == "func_begin":
+            work.append(func_end.get(i, i + 1) + 1)  # sequential skip
+        else:
+            work.append(i + 1)
+
+    return [ins for i, ins in enumerate(code) if i in reachable]
 
 
 def remove_dead_temps(code: list[Instr]) -> list[Instr]:

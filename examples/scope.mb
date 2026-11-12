@@ -1,0 +1,29 @@
+# scope.mb - block scoping, else-if and global state
+let counter: int = 0;
+
+fn bump() {
+  counter = counter + 1;
+}
+
+fn grade(n: int) -> str {
+  if (n >= 90) {
+    return "A";
+  } else if (n >= 80) {
+    return "B";
+  } else {
+    return "C";
+  }
+}
+
+let x: int = 1;
+if (True) {
+  let x: int = 2;      # shadows the outer x inside this block
+  print(x);
+}
+print(x);
+
+bump();
+bump();
+print(counter);
+print(grade(95));
+print(grade(85));
