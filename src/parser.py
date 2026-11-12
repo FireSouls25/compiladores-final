@@ -39,7 +39,8 @@ class Parser:
         if self.check(type_):
             return self.advance()
         t = self.peek()
-        raise ParseError(f"{t.line}:{t.col}: expected {what}, found {t.lexeme!r}")
+        found = "end of file" if t.type == T.EOF else repr(t.lexeme)
+        raise ParseError(f"{t.line}:{t.col}: expected {what}, found {found}")
 
     # -- entry --
     def parse(self) -> A.Program:
@@ -83,7 +84,8 @@ class Parser:
              T.TYPE_BOOL: "bool", T.NONE: "None"}
         if t.type in m:
             return m[t.type]
-        raise ParseError(f"{t.line}:{t.col}: expected a type (int/float/str/bool/None), found {t.lexeme!r}")
+        found = "end of file" if t.type == T.EOF else repr(t.lexeme)
+        raise ParseError(f"{t.line}:{t.col}: expected a type (int/float/str/bool/None), found {found}")
 
     def stmt_list(self) -> list:
         out = []
