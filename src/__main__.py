@@ -6,6 +6,7 @@ from .lexer import Lexer, LexError
 from .parser import Parser, ParseError
 from .semantic import SemanticAnalyzer, SemanticError
 from .ir_gen import IRGenerator
+from .optimizer import optimize
 from .interp import Interpreter, InterpError
 from .diagnostics import format_diagnostics, format_runtime_error
 
@@ -14,7 +15,7 @@ EXIT_COMPILE = 1
 EXIT_IO = 2
 
 
-def compile_source(source: str, dump_tokens=False, dump_ast=False, dump_ir=False):
+def compile_source(source: str, dump_tokens=False, dump_ast=False, dump_ir=False, opt=False):
     toks = Lexer(source).tokenize()
     if dump_tokens:
         print("== TOKENS ==")
@@ -27,8 +28,10 @@ def compile_source(source: str, dump_tokens=False, dump_ast=False, dump_ir=False
             print(f"  {it}")
     sym = SemanticAnalyzer().analyze(prog)
     ir = IRGenerator().generate(prog)
+    if opt:
+        ir = optimize(ir)
     if dump_ir:
-        print("== IR ==")
+        print("== IR ==" if not opt else "== IR (optimized) ==")
         for ins in ir:
             print(ins)
     return prog, sym, ir
@@ -40,6 +43,7 @@ def main(argv=None):
     ap.add_argument("--dump-tokens", action="store_true", help="print the token stream")
     ap.add_argument("--dump-ast", action="store_true", help="print the AST")
     ap.add_argument("--dump-ir", action="store_true", help="print the generated TAC")
+    ap.add_argument("--opt", action="store_true", help="optimize the TAC before running")
     ap.add_argument("--no-run", action="store_true", help="compile only, do not execute")
     args = ap.parse_args(argv)
 
@@ -56,6 +60,7 @@ def main(argv=None):
             dump_tokens=args.dump_tokens,
             dump_ast=args.dump_ast,
             dump_ir=args.dump_ir,
+            opt=args.opt,
         )
     except (LexError, ParseError, SemanticError) as e:
         print(format_diagnostics(args.file, source, str(e)), file=sys.stderr)
