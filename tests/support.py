@@ -24,7 +24,7 @@ def compile_pipeline(source: str, opt: bool = False):
     sym = SemanticAnalyzer().analyze(prog)
     ir = IRGenerator().generate(prog)
     if opt:
-        ir = optimize(ir)
+        ir = optimize(ir, sym["globals"])
     return prog, sym, ir
 
 

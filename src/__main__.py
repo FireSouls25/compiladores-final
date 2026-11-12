@@ -30,7 +30,7 @@ def compile_source(source: str, dump_tokens=False, dump_ast=False, dump_ir=False
     sym = SemanticAnalyzer().analyze(prog)
     ir = IRGenerator().generate(prog)
     if opt:
-        ir = optimize(ir)
+        ir = optimize(ir, sym["globals"])
     if dump_ir:
         print("== IR ==" if not opt else "== IR (optimized) ==")
         for ins in ir:

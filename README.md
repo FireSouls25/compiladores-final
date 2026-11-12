@@ -140,9 +140,11 @@ identificador MiniB, por lo que nunca chocan con variables del usuario.
 ### Optimizador
 
 `--opt` aplica, hasta punto fijo: plegado de constantes, propagación de
-temporales constantes, eliminación de condiciones constantes, eliminación de
-bloques inalcanzables y de temporales muertos. Las llamadas nunca se eliminan
-porque pueden tener efectos (por ejemplo `print`).
+temporales y de variables constantes, eliminación de condiciones constantes,
+**movimiento de código invariante fuera de los bucles (LICM)**, eliminación de
+bucles muertos (condición constante), bloques inalcanzables y temporales
+muertos. Las llamadas nunca se eliminan porque pueden tener efectos (por ejemplo
+`print`), y la división/módulo no se mueven porque pueden fallar en ejecución.
 
 ```text
 # sin --opt
@@ -203,6 +205,7 @@ CLI (80+ casos, incluidos los ejemplos completos).
 
 - Las listas no tienen tipo de elemento ni funciones propias (`push`, `pop`, ...);
   se accede con índice y `len`.
-- El optimizador no hace propagación de variables ni análisis de bucles.
+- El optimizador no hace análisis interprocedimental: una llamada a una función
+  dentro de un bucle impide mover invariantes que dependan de globales.
 - El backend genera Python; un siguiente paso natural es generar C o LLVM IR.
 - No hay ejecución de ambos caminos ni verificación formal de tipos.
