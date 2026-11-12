@@ -111,6 +111,10 @@ class SemanticAnalyzer:
         Re-declaring in the *same* scope is an error. Declaring a name that
         exists in an *outer* scope is shadowing and gets a unique resolved name.
         """
+        if name in BUILTINS:
+            self.err(line, col, f"cannot declare '{name}': it is a builtin")
+        if name in self.functions:
+            self.err(line, col, f"cannot declare '{name}': it is already a function")
         if name in self.scopes[-1]:
             self.errors.append(f"{line}:{col}: redeclaration of '{name}' in same scope")
             return {**info, "resolved": name}
@@ -159,6 +163,10 @@ class SemanticAnalyzer:
         for p in fn.params:
             if p.name in seen:
                 self.err(p.line, p.col, f"duplicate parameter '{p.name}'")
+            if p.name in BUILTINS:
+                self.err(p.line, p.col, f"parameter '{p.name}' shadows a builtin")
+            if p.name in self.functions:
+                self.err(p.line, p.col, f"parameter '{p.name}' shadows a function")
             seen.add(p.name)
             self.scopes[-1][p.name] = {
                 "kind": "param",

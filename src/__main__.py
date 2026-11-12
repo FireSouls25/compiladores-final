@@ -8,6 +8,7 @@ from .semantic import SemanticAnalyzer, SemanticError
 from .ir_gen import IRGenerator
 from .optimizer import optimize
 from .interp import Interpreter, InterpError
+from .py_codegen import generate_python
 from .diagnostics import format_diagnostics, format_runtime_error
 
 EXIT_OK = 0
@@ -45,6 +46,17 @@ def main(argv=None):
     ap.add_argument("--dump-ir", action="store_true", help="print the generated TAC")
     ap.add_argument("--opt", action="store_true", help="optimize the TAC before running")
     ap.add_argument("--no-run", action="store_true", help="compile only, do not execute")
+    ap.add_argument(
+        "--emit-py",
+        action="store_true",
+        help="emit Python source instead of running",
+    )
+    ap.add_argument(
+        "-o",
+        "--output",
+        metavar="FILE",
+        help="write the --emit-py output to FILE (default: stdout)",
+    )
     args = ap.parse_args(argv)
 
     try:
@@ -55,7 +67,7 @@ def main(argv=None):
         return EXIT_IO
 
     try:
-        _, sym, ir = compile_source(
+        prog, sym, ir = compile_source(
             source,
             dump_tokens=args.dump_tokens,
             dump_ast=args.dump_ast,
@@ -65,6 +77,19 @@ def main(argv=None):
     except (LexError, ParseError, SemanticError) as e:
         print(format_diagnostics(args.file, source, str(e)), file=sys.stderr)
         return EXIT_COMPILE
+
+    if args.emit_py:
+        code = generate_python(prog)
+        if not args.output:
+            print(code, end="")
+        else:
+            try:
+                with open(args.output, "w", encoding="utf-8") as f:
+                    f.write(code)
+            except OSError as e:
+                print(f"error: cannot write {args.output}: {e}", file=sys.stderr)
+                return EXIT_IO
+        return EXIT_OK
 
     if not args.no_run:
         try:
