@@ -1,6 +1,7 @@
 """Phase 2: Parser (syntactic analysis). Tokens -> AST (recursive descent)."""
 from . import tokens as T
 from . import ast_nodes as A
+from .suggest import closest
 
 
 class ParseError(Exception):
@@ -85,7 +86,11 @@ class Parser:
         if t.type in m:
             return m[t.type]
         found = "end of file" if t.type == T.EOF else repr(t.lexeme)
-        raise ParseError(f"{t.line}:{t.col}: expected a type (int/float/str/bool/list/None), found {found}")
+        msg = f"expected a type (int/float/str/bool/list/None), found {found}"
+        suggestion = closest(t.lexeme, ["int", "float", "str", "bool", "list", "None"], max_distance=3)
+        if suggestion is not None:
+            msg += f" (did you mean '{suggestion}'?)"
+        raise ParseError(f"{t.line}:{t.col}: {msg}")
 
     def stmt_list(self) -> list:
         out = []
@@ -115,6 +120,18 @@ class Parser:
             nxt = self.toks[self.i + 1]
             if nxt.type == T.EQ:
                 return self.assign_stmt()
+            # Catch misspelled statement keywords: `whil (...)`, `retrun ...`
+            if nxt.type in (T.LPAREN, T.LBRACE):
+                t = self.peek()
+                if len(t.lexeme) >= 4:
+                    control = ["fn", "let", "if", "else", "while", "for",
+                               "break", "continue", "return"]
+                    suggestion = closest(t.lexeme, control, max_distance=1)
+                    if suggestion is not None:
+                        raise ParseError(
+                            f"{t.line}:{t.col}: unknown keyword '{t.lexeme}' "
+                            f"(did you mean '{suggestion}'?)"
+                        )
         return self.expr_stmt()
 
     def block_stmt(self):

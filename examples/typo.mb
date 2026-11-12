@@ -1,0 +1,3 @@
+# typo.mb - should fail with a spelling suggestion
+let counter = 0;
+print(cuonter);

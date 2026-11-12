@@ -176,7 +176,11 @@ examples\error.mb:2:1: error: cannot assign 'str' to 'int' in 'let x'
 
 La fase semántica reporta **todos** los errores que encuentra, no solo el primero.
 Los errores de ejecución se reportan como `runtime error` (por ejemplo, división
-por cero).
+por cero). Los nombres mal escritos incluyen una sugerencia:
+
+```text
+examples\typo.mb:3:7: error: undefined variable 'cuonter' (did you mean 'counter'?)
+```
 
 ## Pruebas
 
@@ -186,8 +190,8 @@ python -m pytest
 python -m unittest discover -s tests -t .
 ```
 
-La suite cubre lexer, parser, semántica, IR, optimizador, intérprete, backend y
-CLI (80+ casos, incluidos los ejemplos completos).
+La suite cubre lexer, parser, semántica, IR, optimizador, intérprete, backend,
+sugerencias y CLI (130+ casos, incluidos los ejemplos completos).
 
 ## Ejemplos incluidos
 
@@ -200,6 +204,7 @@ CLI (80+ casos, incluidos los ejemplos completos).
 | `examples/loops.mb` | `for`, `break`, `continue`, bucles anidados |
 | `examples/arrays.mb` | listas, índices, mutación, `len` |
 | `examples/error.mb` | diagnóstico semántico |
+| `examples/typo.mb` | sugerencia por nombre mal escrito |
 
 ## Limitaciones y siguientes pasos
 

@@ -15,6 +15,7 @@ Resolution is stored on the AST (`LetStmt.resolved_name`, `AssignStmt.resolved`,
 `Var.resolved`) and consumed by the IR generator / Python backend.
 """
 from . import ast_nodes as A
+from .suggest import closest
 
 
 class SemanticError(Exception):
@@ -135,6 +136,21 @@ class SemanticAnalyzer:
     def err(self, line, col, msg):
         self.errors.append(f"{line}:{col}: {msg}")
 
+    def visible_names(self) -> set[str]:
+        names: set[str] = set(BUILTINS)
+        for scope in self.scopes:
+            names |= set(scope)
+        return names
+
+    def undefined_variable(self, name, line, col):
+        msg = f"undefined variable '{name}'"
+        suggestion = closest(name, self.visible_names())
+        if suggestion is not None:
+            msg += f" (did you mean '{suggestion}'?)"
+        elif name in self.functions:
+            msg += f" (did you mean to call '{name}(...)'?)"
+        self.err(line, col, msg)
+
     # -- entry --
     def analyze(self, prog: A.Program) -> dict:
         # pass 1: register all function signatures (allows forward calls)
@@ -208,7 +224,7 @@ class SemanticAnalyzer:
         elif isinstance(s, A.AssignStmt):
             info = self.lookup(s.name)
             if info is None:
-                self.err(s.line, s.col, f"undefined variable '{s.name}'")
+                self.undefined_variable(s.name, s.line, s.col)
                 self.check_expr(s.expr)
             else:
                 s.resolved = info["resolved"]
@@ -285,7 +301,7 @@ class SemanticAnalyzer:
         if isinstance(e, A.Var):
             info = self.lookup(e.name)
             if info is None:
-                self.err(e.line, e.col, f"undefined variable '{e.name}'")
+                self.undefined_variable(e.name, e.line, e.col)
                 return "unknown"
             e.resolved = info["resolved"]
             return info["type"]
@@ -338,7 +354,15 @@ class SemanticAnalyzer:
                     return "int"
             sig = self.functions.get(e.name)
             if sig is None:
-                self.err(e.line, e.col, f"undefined function '{e.name}'")
+                msg = f"undefined function '{e.name}'"
+                suggestion = closest(
+                    e.name, list(self.functions) + list(BUILTINS)
+                )
+                if suggestion is not None:
+                    msg += f" (did you mean '{suggestion}'?)"
+                elif self.lookup(e.name) is not None:
+                    msg += f" (variable '{e.name}' is not callable)"
+                self.err(e.line, e.col, msg)
                 return "unknown"
             exp = sig["params"]
             if len(exp) != len(arg_ts):
