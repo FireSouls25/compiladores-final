@@ -95,6 +95,18 @@ class Interpreter:
                 frames[-1][ins.a] = self.apply_unop(ins.c, value_of(ins.b))
                 pc += 1
 
+            elif op == "list":
+                frames[-1][ins.a] = [value_of(x) for x in (ins.b or [])]
+                pc += 1
+
+            elif op == "index":
+                frames[-1][ins.a] = self.get_index(value_of(ins.b), value_of(ins.c))
+                pc += 1
+
+            elif op == "setindex":
+                self.set_index(lookup(ins.a), value_of(ins.b), value_of(ins.c))
+                pc += 1
+
             elif op == "goto":
                 pc = self.labels[ins.a]
 
@@ -138,8 +150,8 @@ class Interpreter:
                 frames[-1][dest] = None
             return pc + 1
         if name == "len":
-            if len(args) != 1 or not isinstance(args[0], str):
-                raise InterpError("runtime: len() expects 1 str")
+            if len(args) != 1 or not isinstance(args[0], (str, list)):
+                raise InterpError("runtime: len() expects 1 str or list")
             if dest is not None:
                 frames[-1][dest] = len(args[0])
             return pc + 1
@@ -162,6 +174,28 @@ class Interpreter:
         call_stack.append((pc + 1, dest))
         frames.append(dict(zip(fn["params"], args)))
         return fn["entry"]
+
+    @staticmethod
+    def get_index(obj, idx):
+        if not isinstance(obj, (list, str)):
+            raise InterpError("runtime: cannot index a non-list/non-str value")
+        if not isinstance(idx, int) or isinstance(idx, bool):
+            raise InterpError("runtime: index must be int")
+        try:
+            return obj[idx]
+        except IndexError:
+            raise InterpError(f"runtime: index {idx} out of range")
+
+    @staticmethod
+    def set_index(obj, idx, val):
+        if not isinstance(obj, list):
+            raise InterpError("runtime: cannot assign to an index of a non-list value")
+        if not isinstance(idx, int) or isinstance(idx, bool):
+            raise InterpError("runtime: index must be int")
+        try:
+            obj[idx] = val
+        except IndexError:
+            raise InterpError(f"runtime: index {idx} out of range")
 
     @staticmethod
     def apply_binop(op, l, r):

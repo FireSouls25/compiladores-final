@@ -81,11 +81,11 @@ class Parser:
     def type_name(self) -> str:
         t = self.advance()
         m = {T.TYPE_INT: "int", T.TYPE_FLOAT: "float", T.TYPE_STR: "str",
-             T.TYPE_BOOL: "bool", T.NONE: "None"}
+             T.TYPE_BOOL: "bool", T.TYPE_LIST: "list", T.NONE: "None"}
         if t.type in m:
             return m[t.type]
         found = "end of file" if t.type == T.EOF else repr(t.lexeme)
-        raise ParseError(f"{t.line}:{t.col}: expected a type (int/float/str/bool/None), found {found}")
+        raise ParseError(f"{t.line}:{t.col}: expected a type (int/float/str/bool/list/None), found {found}")
 
     def stmt_list(self) -> list:
         out = []
@@ -100,6 +100,12 @@ class Parser:
             return self.if_stmt()
         if self.check(T.WHILE):
             return self.while_stmt()
+        if self.check(T.FOR):
+            return self.for_stmt()
+        if self.check(T.BREAK):
+            return self.jump_stmt(T.BREAK, A.BreakStmt, "'break'")
+        if self.check(T.CONTINUE):
+            return self.jump_stmt(T.CONTINUE, A.ContinueStmt, "'continue'")
         if self.check(T.RETURN):
             return self.return_stmt()
         if self.check(T.LBRACE):
@@ -163,6 +169,45 @@ class Parser:
         self.expect(T.RBRACE, "'}'")
         return A.WhileStmt(cond, body, kw.line, kw.col)
 
+    def for_stmt(self):
+        kw = self.expect(T.FOR, "'for'")
+        self.expect(T.LPAREN, "'(' after 'for'")
+        init = self.for_head()
+        self.expect(T.SEMI, "';' after 'for' initializer")
+        cond = self.expr()
+        self.expect(T.SEMI, "';' after 'for' condition")
+        update = self.for_head()
+        self.expect(T.RPAREN, "')'")
+        self.expect(T.LBRACE, "'{'")
+        body = self.stmt_list()
+        self.expect(T.RBRACE, "'}'")
+        return A.ForStmt(init, cond, update, body, kw.line, kw.col)
+
+    def for_head(self):
+        """Parse `let i = ...`, `i = ...` or an expression (no semicolon)."""
+        if self.check(T.LET):
+            kw = self.expect(T.LET, "'let'")
+            name = self.expect(T.IDENT, "variable name")
+            ann = None
+            if self.match(T.COLON):
+                ann = self.type_name()
+            self.expect(T.EQ, "'='")
+            e = self.expr()
+            return A.LetStmt(name.lexeme, ann, e, kw.line, kw.col)
+        if self.check(T.IDENT) and self.i + 1 < len(self.toks):
+            if self.toks[self.i + 1].type == T.EQ:
+                name = self.expect(T.IDENT, "variable name")
+                self.expect(T.EQ, "'='")
+                e = self.expr()
+                return A.AssignStmt(name.lexeme, e, name.line, name.col)
+        e = self.expr()
+        return A.ExprStmt(e, getattr(e, "line", 0), getattr(e, "col", 0))
+
+    def jump_stmt(self, type_, node_cls, what):
+        kw = self.expect(type_, what)
+        self.expect(T.SEMI, "';'")
+        return node_cls(kw.line, kw.col)
+
     def return_stmt(self):
         kw = self.expect(T.RETURN, "'return'")
         e = None
@@ -173,6 +218,14 @@ class Parser:
 
     def expr_stmt(self):
         e = self.expr()
+        if self.match(T.EQ):
+            if isinstance(e, A.Index) and isinstance(e.target, A.Var):
+                val = self.expr()
+                self.expect(T.SEMI, "';'")
+                return A.SetIndexStmt(e.target, e.index, val, e.line, e.col)
+            raise ParseError(
+                f"{getattr(e, 'line', 0)}:{getattr(e, 'col', 0)}: invalid assignment target"
+            )
         t = self.peek()
         self.expect(T.SEMI, "';'")
         line = getattr(e, "line", t.line)
@@ -257,6 +310,14 @@ class Parser:
             return A.Literal(False, "bool", t.line, t.col)
         if self.match(T.NONE):
             return A.Literal(None, "None", t.line, t.col)
+        if self.match(T.LBRACKET):
+            items = []
+            if not self.check(T.RBRACKET):
+                items.append(self.expr())
+                while self.match(T.COMMA):
+                    items.append(self.expr())
+            self.expect(T.RBRACKET, "']'")
+            return A.ListLit(items, t.line, t.col)
         if self.match(T.IDENT):
             if self.check(T.LPAREN):
                 self.advance()  # '('
@@ -267,7 +328,12 @@ class Parser:
                         args.append(self.expr())
                 self.expect(T.RPAREN, "')'")
                 return A.Call(t.lexeme, args, t.line, t.col)
-            return A.Var(t.lexeme, t.line, t.col)
+            node: object = A.Var(t.lexeme, t.line, t.col)
+            while self.match(T.LBRACKET):
+                idx = self.expr()
+                self.expect(T.RBRACKET, "']'")
+                node = A.Index(node, idx, t.line, t.col)
+            return node
         if self.match(T.LPAREN):
             e = self.expr()
             self.expect(T.RPAREN, "')'")

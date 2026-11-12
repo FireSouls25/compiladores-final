@@ -1,0 +1,27 @@
+# loops.mb - for, break, continue and nested loops
+let total: int = 0;
+
+for (let i = 0; i < 10; i = i + 1) {
+  if (i == 3) {
+    continue;
+  }
+  if (i == 7) {
+    break;
+  }
+  total = total + i;
+}
+print(total);
+
+let rows: int = 0;
+while (rows < 3) {
+  let cols: int = 0;
+  while (cols < 3) {
+    if (cols == 1) {
+      cols = cols + 1;
+      continue;
+    }
+    print(rows * 10 + cols);
+    cols = cols + 1;
+  }
+  rows = rows + 1;
+}

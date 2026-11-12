@@ -149,13 +149,13 @@ def remove_dead_temps(code: list[Instr]) -> list[Instr]:
         changed = False
         used: set = set()
         for ins in code:
-            for operand in (ins.b, ins.extra):
-                if is_temp(operand):
-                    used.add(operand)
-            for arg in ins.b if ins.op == "call" and isinstance(ins.b, list) else []:
-                if is_temp(arg):
-                    used.add(arg)
-            if ins.op in ("return", "ifFalse") and is_temp(ins.a):
+            # Reads live in b/c/extra (for `call` and `list`, b is a list).
+            for operand in (ins.b, ins.c, ins.extra):
+                values = operand if isinstance(operand, list) else [operand]
+                for v in values:
+                    if is_temp(v):
+                        used.add(v)
+            if ins.op in ("return", "ifFalse", "setindex") and is_temp(ins.a):
                 used.add(ins.a)
         kept = []
         for ins in code:

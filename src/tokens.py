@@ -8,6 +8,9 @@ LET = "LET"
 IF = "IF"
 ELSE = "ELSE"
 WHILE = "WHILE"
+FOR = "FOR"
+BREAK = "BREAK"
+CONTINUE = "CONTINUE"
 RETURN = "RETURN"
 AND = "AND"
 OR = "OR"
@@ -19,6 +22,7 @@ TYPE_INT = "TYPE_INT"
 TYPE_FLOAT = "TYPE_FLOAT"
 TYPE_STR = "TYPE_STR"
 TYPE_BOOL = "TYPE_BOOL"
+TYPE_LIST = "TYPE_LIST"
 IDENT = "IDENT"
 INT_LIT = "INT_LIT"
 FLOAT_LIT = "FLOAT_LIT"
@@ -42,6 +46,8 @@ LPAREN = "LPAREN"
 RPAREN = "RPAREN"
 LBRACE = "LBRACE"
 RBRACE = "RBRACE"
+LBRACKET = "LBRACKET"
+RBRACKET = "RBRACKET"
 ARROW = "ARROW"
 EOF = "EOF"
 
@@ -51,6 +57,9 @@ KEYWORDS = {
     "if": IF,
     "else": ELSE,
     "while": WHILE,
+    "for": FOR,
+    "break": BREAK,
+    "continue": CONTINUE,
     "return": RETURN,
     "and": AND,
     "or": OR,
@@ -62,6 +71,7 @@ KEYWORDS = {
     "float": TYPE_FLOAT,
     "str": TYPE_STR,
     "bool": TYPE_BOOL,
+    "list": TYPE_LIST,
 }
 
 

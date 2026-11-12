@@ -39,6 +39,19 @@ class Call:
     line: int = 0
     col: int = 0
 
+@dataclass
+class ListLit:
+    items: list
+    line: int = 0
+    col: int = 0
+
+@dataclass
+class Index:
+    target: object
+    index: object
+    line: int = 0
+    col: int = 0
+
 # ---- statements ----
 
 @dataclass
@@ -68,6 +81,33 @@ class IfStmt:
 class WhileStmt:
     cond: object
     body: list
+    line: int = 0
+    col: int = 0
+
+@dataclass
+class ForStmt:
+    init: object        # LetStmt | AssignStmt | ExprStmt
+    cond: object
+    update: object      # AssignStmt | ExprStmt
+    body: list
+    line: int = 0
+    col: int = 0
+
+@dataclass
+class BreakStmt:
+    line: int = 0
+    col: int = 0
+
+@dataclass
+class ContinueStmt:
+    line: int = 0
+    col: int = 0
+
+@dataclass
+class SetIndexStmt:
+    target: object      # Var
+    index: object
+    expr: object
     line: int = 0
     col: int = 0
 

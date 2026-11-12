@@ -79,6 +79,8 @@ def _top_level_globals(items: list) -> list[str]:
                 names.append(getattr(s, "resolved_name", s.name))
             elif isinstance(s, A.Block):
                 walk(s.stmts)
+            elif isinstance(s, A.ForStmt) and isinstance(s.init, A.LetStmt):
+                names.append(getattr(s.init, "resolved_name", s.init.name))
 
     walk(items)
     return names
@@ -92,6 +94,7 @@ class SemanticAnalyzer:
         self.current_ret: str | None = None
         self.current_fn: str | None = None
         self.has_return: bool = False
+        self.loop_depth: int = 0
         self._fresh = 0
 
     # -- scope helpers --
@@ -159,6 +162,7 @@ class SemanticAnalyzer:
         self.current_ret = fn.ret
         self.current_fn = fn.name
         self.has_return = False
+        self.loop_depth = 0
         seen = set()
         for p in fn.params:
             if p.name in seen:
@@ -228,9 +232,37 @@ class SemanticAnalyzer:
             if t != "bool":
                 self.err(s.line, s.col, f"'while' condition must be bool, got '{t}'")
             self.push()
+            self.loop_depth += 1
             for x in s.body:
                 self.check_stmt(x)
+            self.loop_depth -= 1
             self.pop()
+        elif isinstance(s, A.ForStmt):
+            self.push()
+            self.check_stmt(s.init)
+            t = self.check_expr(s.cond)
+            if t != "bool":
+                self.err(s.line, s.col, f"'for' condition must be bool, got '{t}'")
+            self.check_stmt(s.update)
+            self.loop_depth += 1
+            for x in s.body:
+                self.check_stmt(x)
+            self.loop_depth -= 1
+            self.pop()
+        elif isinstance(s, A.BreakStmt):
+            if self.loop_depth == 0:
+                self.err(s.line, s.col, "'break' outside loop")
+        elif isinstance(s, A.ContinueStmt):
+            if self.loop_depth == 0:
+                self.err(s.line, s.col, "'continue' outside loop")
+        elif isinstance(s, A.SetIndexStmt):
+            tt = self.check_expr(s.target)
+            it = self.check_expr(s.index)
+            self.check_expr(s.expr)
+            if tt not in ("list", "unknown"):
+                self.err(s.line, s.col, f"cannot assign to an index of '{tt}'")
+            if it not in ("int", "unknown"):
+                self.err(s.line, s.col, f"list index must be int, got '{it}'")
         elif isinstance(s, A.ReturnStmt):
             if self.current_ret is None:
                 self.err(s.line, s.col, "'return' outside function")
@@ -257,6 +289,22 @@ class SemanticAnalyzer:
                 return "unknown"
             e.resolved = info["resolved"]
             return info["type"]
+        if isinstance(e, A.ListLit):
+            for item in e.items:
+                self.check_expr(item)
+            return "list"
+        if isinstance(e, A.Index):
+            tt = self.check_expr(e.target)
+            it = self.check_expr(e.index)
+            if it not in ("int", "unknown"):
+                self.err(e.line, e.col, f"index must be int, got '{it}'")
+            if tt == "str":
+                return "str"
+            if tt == "list":
+                return "unknown"
+            if tt != "unknown":
+                self.err(e.line, e.col, f"cannot index a value of type '{tt}'")
+            return "unknown"
         if isinstance(e, A.UnaryOp):
             t = self.check_expr(e.operand)
             if e.op == "not":
@@ -282,12 +330,12 @@ class SemanticAnalyzer:
                         self.err(e.line, e.col, "'input' takes 0 args or 1 str prompt")
                     return "str"
                 # len
-                if len(arg_ts) != 1:
-                    self.err(e.line, e.col, f"'{e.name}' expects {len(params)} arg(s), got {len(arg_ts)}")
-                    return ret
-                if not assignable(params[0], arg_ts[0]):
-                    self.err(e.line, e.col, f"'{e.name}' expects '{params[0]}', got '{arg_ts[0]}'")
-                return ret
+                if e.name == "len":
+                    if len(arg_ts) != 1:
+                        self.err(e.line, e.col, f"'len' expects 1 arg(s), got {len(arg_ts)}")
+                    elif arg_ts[0] not in ("str", "list", "unknown"):
+                        self.err(e.line, e.col, f"'len' expects 'str' or 'list', got '{arg_ts[0]}'")
+                    return "int"
             sig = self.functions.get(e.name)
             if sig is None:
                 self.err(e.line, e.col, f"undefined function '{e.name}'")

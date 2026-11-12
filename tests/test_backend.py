@@ -1,16 +1,7 @@
-import contextlib
-import io
 import unittest
 
 from tests.support import *
 from src.py_codegen import generate_python
-
-
-def run_python(code: str) -> str:
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        exec(compile(code, "<generated>", "exec"), {"__name__": "__main__"})
-    return buf.getvalue()
 
 
 class BackendTests(unittest.TestCase):

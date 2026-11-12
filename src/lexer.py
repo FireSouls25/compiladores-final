@@ -125,6 +125,7 @@ class Lexer:
             ":": T.COLON, ",": T.COMMA, ";": T.SEMI,
             "(": T.LPAREN, ")": T.RPAREN,
             "{": T.LBRACE, "}": T.RBRACE,
+            "[": T.LBRACKET, "]": T.RBRACKET,
         }
         if ch in single:
             self.advance()

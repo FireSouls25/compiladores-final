@@ -26,6 +26,13 @@ class Instr:
             return f"{self.a}:"
         if self.op == "assign":
             return f"  {self.a} = {fmt(self.b)}"
+        if self.op == "list":
+            items = ", ".join(fmt(x) for x in (self.b or []))
+            return f"  {self.a} = [{items}]"
+        if self.op == "index":
+            return f"  {self.a} = {fmt(self.b)}[{fmt(self.c)}]"
+        if self.op == "setindex":
+            return f"  {fmt(self.a)}[{fmt(self.b)}] = {fmt(self.c)}"
         if self.op == "binop":
             return f"  {self.a} = {fmt(self.b)} {self.c} {fmt(self.extra)}"
         if self.op == "unop":
@@ -79,6 +86,8 @@ class IRGenerator:
         self.code: list[Instr] = []
         self.t = 0
         self.l = 0
+        self.break_targets: list[str] = []
+        self.continue_targets: list[str] = []
 
     def temp(self) -> str:
         self.t += 1
@@ -134,10 +143,43 @@ class IRGenerator:
             self.emit(Instr("label", ls))
             c = self.gen_expr(s.cond)
             self.emit(Instr("ifFalse", c, le))
+            self.break_targets.append(le)
+            self.continue_targets.append(ls)
             for x in s.body:
                 self.gen_stmt(x, is_top)
+            self.break_targets.pop()
+            self.continue_targets.pop()
             self.emit(Instr("goto", ls))
             self.emit(Instr("label", le))
+        elif isinstance(s, A.ForStmt):
+            self.gen_stmt(s.init, is_top)
+            ls, lu, le = self.label(), self.label(), self.label()
+            self.emit(Instr("label", ls))
+            c = self.gen_expr(s.cond)
+            self.emit(Instr("ifFalse", c, le))
+            self.break_targets.append(le)
+            self.continue_targets.append(lu)
+            for x in s.body:
+                self.gen_stmt(x, is_top)
+            self.break_targets.pop()
+            self.continue_targets.pop()
+            self.emit(Instr("label", lu))
+            self.gen_stmt(s.update, is_top)
+            self.emit(Instr("goto", ls))
+            self.emit(Instr("label", le))
+        elif isinstance(s, A.BreakStmt):
+            if not self.break_targets:
+                raise ValueError("break outside loop reached IR generation")
+            self.emit(Instr("goto", self.break_targets[-1]))
+        elif isinstance(s, A.ContinueStmt):
+            if not self.continue_targets:
+                raise ValueError("continue outside loop reached IR generation")
+            self.emit(Instr("goto", self.continue_targets[-1]))
+        elif isinstance(s, A.SetIndexStmt):
+            target = getattr(s.target, "resolved", s.target.name)
+            idx = self.gen_expr(s.index)
+            val = self.gen_expr(s.expr)
+            self.emit(Instr("setindex", target, idx, val))
         elif isinstance(s, A.ReturnStmt):
             v = self.gen_expr(s.expr) if s.expr is not None else None
             self.emit(Instr("return", v))
@@ -153,6 +195,17 @@ class IRGenerator:
             return e.value
         if isinstance(e, A.Var):
             return getattr(e, "resolved", e.name)
+        if isinstance(e, A.ListLit):
+            items = [self.gen_expr(x) for x in e.items]
+            d = self.temp()
+            self.emit(Instr("list", d, items))
+            return d
+        if isinstance(e, A.Index):
+            target = self.gen_expr(e.target)
+            idx = self.gen_expr(e.index)
+            d = self.temp()
+            self.emit(Instr("index", d, target, idx))
+            return d
         if isinstance(e, A.UnaryOp):
             v = self.gen_expr(e.operand)
             d = self.temp()

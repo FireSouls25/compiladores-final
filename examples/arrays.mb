@@ -1,0 +1,18 @@
+# arrays.mb - list literals, indexing and mutation
+let numbers: list = [10, 20, 30, 40];
+
+let i: int = 0;
+while (i < len(numbers)) {
+  print(numbers[i]);
+  i = i + 1;
+}
+
+numbers[1] = 99;
+print(numbers[1]);
+
+let names: list = ["ana", "luis"];
+print(names[0] + " y " + names[1]);
+
+let word: str = "hola";
+print(word[0]);
+print(len(names));

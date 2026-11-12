@@ -52,6 +52,8 @@ def _collect_globals(items: list) -> set[str]:
                 names.add(_name(s))
             elif isinstance(s, A.Block):
                 walk(s.stmts)
+            elif isinstance(s, A.ForStmt) and isinstance(s.init, A.LetStmt):
+                names.add(_name(s.init))
 
     walk(items)
     return names
@@ -65,12 +67,17 @@ def _assigned_names(stmts: list) -> set[str]:
         for s in ss:
             if isinstance(s, A.AssignStmt):
                 names.add(_name(s))
+            elif isinstance(s, A.SetIndexStmt):
+                names.add(_name(s.target))
             elif isinstance(s, A.Block):
                 walk(s.stmts)
             elif isinstance(s, A.IfStmt):
                 walk(s.then_body)
                 walk(s.else_body)
             elif isinstance(s, A.WhileStmt):
+                walk(s.body)
+            elif isinstance(s, A.ForStmt):
+                walk([s.init, s.update])
                 walk(s.body)
 
     walk(stmts)
@@ -104,6 +111,7 @@ class PythonCodeGen:
         self.level = 0
         self.names = _Names(set())
         self.global_names: set[str] = set()
+        self.continue_hooks: list = []
 
     # -- output helpers --
     def emit(self, line: str = ""):
@@ -164,7 +172,23 @@ class PythonCodeGen:
             self.if_stmt(s)
         elif isinstance(s, A.WhileStmt):
             self.emit(f"while {self.expr(s.cond)}:")
+            self.continue_hooks.append(None)
             self.body(s.body)
+            self.continue_hooks.pop()
+        elif isinstance(s, A.ForStmt):
+            self.for_stmt(s)
+        elif isinstance(s, A.BreakStmt):
+            self.emit("break")
+        elif isinstance(s, A.ContinueStmt):
+            hook = self.continue_hooks[-1] if self.continue_hooks else None
+            if hook is not None:
+                hook()  # `for` update must run before `continue`
+            self.emit("continue")
+        elif isinstance(s, A.SetIndexStmt):
+            target = self.names(_name(s.target))
+            self.emit(
+                f"{target}[{self.expr(s.index)}] = {self.expr(s.expr)}"
+            )
         elif isinstance(s, A.ReturnStmt):
             self.emit("return" if s.expr is None else f"return {self.expr(s.expr)}")
         elif isinstance(s, A.ExprStmt):
@@ -183,6 +207,19 @@ class PythonCodeGen:
             self.emit("else:")
             self.body(s.else_body)
 
+    def for_stmt(self, s: A.ForStmt):
+        self.stmt(s.init)
+        self.emit(f"while {self.expr(s.cond)}:")
+        self.level += 1
+        self.continue_hooks.append(lambda: self.stmt(s.update))
+        if not s.body:
+            self.emit("pass")
+        for x in s.body:
+            self.stmt(x)
+        self.continue_hooks.pop()
+        self.stmt(s.update)
+        self.level -= 1
+
     # -- expressions --
     def expr(self, e) -> str:
         if isinstance(e, A.Literal):
@@ -195,6 +232,11 @@ class PythonCodeGen:
             return repr(e.value)
         if isinstance(e, A.Var):
             return self.names(getattr(e, "resolved", e.name))
+        if isinstance(e, A.ListLit):
+            items = ", ".join(self.expr(x) for x in e.items)
+            return f"[{items}]"
+        if isinstance(e, A.Index):
+            return f"{self.expr(e.target)}[{self.expr(e.index)}]"
         if isinstance(e, A.UnaryOp):
             op = "not " if e.op == "not" else "-"
             return f"({op}{self.expr(e.operand)})"

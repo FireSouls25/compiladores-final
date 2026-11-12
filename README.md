@@ -43,14 +43,20 @@ program     = { func_def | statement } ;
 func_def    = "fn" IDENT "(" [ param { "," param } ] ")"
               [ "->" type ] "{" { statement } "}" ;
 param       = IDENT [ ":" type ] ;
-type        = "int" | "float" | "str" | "bool" | "None" ;
+type        = "int" | "float" | "str" | "bool" | "list" | "None" ;
 
-statement   = let_stmt | assign_stmt | if_stmt | while_stmt
-            | return_stmt | block | expr_stmt ;
+statement   = let_stmt | assign_stmt | if_stmt | while_stmt | for_stmt
+            | break_stmt | continue_stmt | return_stmt | block
+            | set_index_stmt | expr_stmt ;
 let_stmt    = "let" IDENT [ ":" type ] "=" expr ";" ;
 assign_stmt = IDENT "=" expr ";" ;
+set_index_stmt = IDENT "[" expr "]" "=" expr ";" ;
 if_stmt     = "if" "(" expr ")" block [ "else" ( block | if_stmt ) ] ;
 while_stmt  = "while" "(" expr ")" block ;
+for_stmt    = "for" "(" for_head ";" expr ";" for_head ")" block ;
+for_head    = let_stmt_without_semi | assign_stmt_without_semi | expr ;
+break_stmt  = "break" ";" ;
+continue_stmt = "continue" ";" ;
 return_stmt = "return" [ expr ] ";" ;
 block       = "{" { statement } "}" ;
 expr_stmt   = expr ";" ;
@@ -64,7 +70,8 @@ additive    = multiplicative { ( "+" | "-" ) multiplicative } ;
 multiplicative = unary { ( "*" | "/" | "%" ) unary } ;
 unary       = ( "-" | "not" ) unary | primary ;
 primary     = INT | FLOAT | STRING | "True" | "False" | "None"
-            | IDENT [ "(" [ expr { "," expr } ] ")" ]
+            | "[" [ expr { "," expr } ] "]"
+            | IDENT [ "(" [ expr { "," expr } ] ")" ] { "[" expr "]" }
             | "(" expr ")" ;
 ```
 
@@ -73,17 +80,22 @@ Las cadenas aceptan comillas simples o dobles y escapes (`\n`, `\t`, `\\`, `\"`)
 
 ## Semántica
 
-- **Tipos:** `int`, `float`, `str`, `bool`, `None`; una anotación omitida se infiere.
+- **Tipos:** `int`, `float`, `str`, `bool`, `list`, `None`; una anotación omitida se infiere.
 - **Promoción:** `int` se puede asignar/pasar donde se espera `float`, pero no al revés.
 - **Operadores:** `+` concatena `str` y suma números; `*` repite `str * int`; `%` y `/`
   son numéricos (`/` siempre devuelve `float`); `<`, `<=`, `>`, `>=` requieren números;
   `and`, `or`, `not` requieren `bool`.
-- **Scopes:** `let` es local al bloque. Las variables sombreadas se renombran
-  (`x$1`), así que el shadowing funciona también en el IR plano y en Python.
+- **Listas:** `[1, 2, 3]` crea una lista; `a[i]` lee (también sirve para `str`) y
+  `a[i] = v` escribe. El índice debe ser `int`; el tipo del elemento no se restringe.
+- **Scopes:** `let` es local al bloque; la variable de un `for` vive solo en el bucle.
+  Las variables sombreadas se renombran (`x$1`), así que el shadowing funciona
+  también en el IR plano y en Python.
+- **Bucles:** `while`, `for (init; cond; update)` y `break` / `continue`. En un
+  `for`, `continue` ejecuta el `update` antes de volver a evaluar la condición.
 - **Funciones:** se pueden llamar antes de definirse; se valida aridad, tipos de
   parámetros y de retorno. Una función con retorno distinto de `None` debe
   retornar en **todos** los caminos.
-- **Builtins:** `print(...)`, `len(str)`, `input()` / `input(prompt)`.
+- **Builtins:** `print(...)`, `len(str | list)`, `input()` / `input(prompt)`.
 - **Globales:** una asignación dentro de una función a una global existente
   modifica la global.
 
@@ -183,12 +195,14 @@ CLI (80+ casos, incluidos los ejemplos completos).
 | `examples/fib.mb` | recursión y `while` |
 | `examples/misc.mb` | tipos, `if/else`, floats, strings, bools |
 | `examples/scope.mb` | shadowing, `else if`, estado global |
+| `examples/loops.mb` | `for`, `break`, `continue`, bucles anidados |
+| `examples/arrays.mb` | listas, índices, mutación, `len` |
 | `examples/error.mb` | diagnóstico semántico |
 
 ## Limitaciones y siguientes pasos
 
-- No hay arreglos, `for`, `break`/`continue` ni `else if` sin llaves (sí hay
-  `else if` encadenado).
+- Las listas no tienen tipo de elemento ni funciones propias (`push`, `pop`, ...);
+  se accede con índice y `len`.
 - El optimizador no hace propagación de variables ni análisis de bucles.
 - El backend genera Python; un siguiente paso natural es generar C o LLVM IR.
 - No hay ejecución de ambos caminos ni verificación formal de tipos.
