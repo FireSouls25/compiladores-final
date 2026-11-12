@@ -1,8 +1,12 @@
-"""Phase 4: IR generation. Typed AST -> Three-Address Code (TAC) list."""
+"""Phase 4: IR generation. Typed/resolved AST -> Three-Address Code (TAC).
+
+Temporaries are `%tN` and labels `%LN`. Neither prefix can appear in a MiniB
+identifier (the lexer only accepts letters, digits and `_`), so generated names
+can never collide with user variables.
+"""
 from dataclasses import dataclass, field
 from typing import Any
 from . import ast_nodes as A
-from .parser import _Block
 
 
 @dataclass
@@ -65,6 +69,11 @@ def const(v) -> str:
     return v
 
 
+def var_name(node) -> str:
+    """Resolved (scope-safe) name of a declaration/assignment."""
+    return getattr(node, "resolved_name", None) or getattr(node, "resolved", None) or node.name
+
+
 class IRGenerator:
     def __init__(self):
         self.code: list[Instr] = []
@@ -73,11 +82,11 @@ class IRGenerator:
 
     def temp(self) -> str:
         self.t += 1
-        return f"t{self.t}"
+        return f"%t{self.t}"
 
     def label(self) -> str:
         self.l += 1
-        return f"L{self.l}"
+        return f"%L{self.l}"
 
     def emit(self, ins: Instr):
         self.code.append(ins)
@@ -100,15 +109,15 @@ class IRGenerator:
         self.emit(Instr("func_end", fn.name))
 
     def gen_stmt(self, s, is_top: bool):
-        if isinstance(s, _Block):
+        if isinstance(s, A.Block):
             for x in s.stmts:
                 self.gen_stmt(x, is_top)
         elif isinstance(s, A.LetStmt):
             v = self.gen_expr(s.expr)
-            self.emit(Instr("assign", s.name, v))
+            self.emit(Instr("assign", var_name(s), v))
         elif isinstance(s, A.AssignStmt):
             v = self.gen_expr(s.expr)
-            self.emit(Instr("assign", s.name, v))
+            self.emit(Instr("assign", var_name(s), v))
         elif isinstance(s, A.IfStmt):
             c = self.gen_expr(s.cond)
             le, lend = self.label(), self.label()
@@ -143,7 +152,7 @@ class IRGenerator:
                 return const(e.value)
             return e.value
         if isinstance(e, A.Var):
-            return e.name
+            return getattr(e, "resolved", e.name)
         if isinstance(e, A.UnaryOp):
             v = self.gen_expr(e.operand)
             d = self.temp()

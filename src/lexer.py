@@ -9,6 +9,9 @@ class LexError(Exception):
 
 class Lexer:
     def __init__(self, source: str):
+        # Tolerate a UTF-8 BOM (common on Windows editors).
+        if source.startswith("\ufeff"):
+            source = source[1:]
         self.src = source
         self.n = len(source)
         self.i = 0

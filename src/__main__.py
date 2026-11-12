@@ -46,7 +46,7 @@ def main(argv=None):
         return 2
 
     try:
-        _, _, ir = compile_source(
+        _, sym, ir = compile_source(
             source,
             dump_tokens=args.dump_tokens,
             dump_ast=args.dump_ast,
@@ -58,7 +58,7 @@ def main(argv=None):
 
     if not args.no_run:
         try:
-            Interpreter(ir).run()
+            Interpreter(ir, sym["globals"]).run()
         except InterpError as e:
             print(f"{args.file}: {e}", file=sys.stderr)
             return 1

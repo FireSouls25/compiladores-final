@@ -1,47 +1,49 @@
-"""Phase 5: IR interpreter (tree-walk over TAC so .mb files actually run)."""
-from .ir_gen import Instr, const
+"""Phase 5: IR interpreter (iterative evaluation of the TAC).
 
+The evaluator keeps an explicit call stack, so deep recursion in the source
+language does not consume Python's recursion limit.
+"""
+import builtins
 
-def decode(op):
-    if isinstance(op, str) and op.startswith("@"):
-        return op[1:]
-    return op
+from .ir_gen import Instr
 
 
 class InterpError(Exception):
     pass
 
 
+def decode(op):
+    """Decode an IR string constant (`@text` -> `text`)."""
+    if isinstance(op, str) and op.startswith("@"):
+        return op[1:]
+    return op
+
+
 class Interpreter:
-    def __init__(self, code: list[Instr]):
+    def __init__(self, code: list[Instr], global_names=None):
         self.code = code
+        self.global_names = set(global_names or ())
         self.labels: dict[str, int] = {}
         self.funcs: dict[str, dict] = {}
-        self.globals: dict = {}
+        self.globals: dict = {}  # frame 0
         for i, ins in enumerate(code):
             if ins.op == "label":
                 self.labels[ins.a] = i
             elif ins.op == "func_begin":
-                # find matching func_end
-                depth = 1
+                # Functions are not nested: the first func_end closes this one.
                 j = i + 1
-                while j < len(code):
-                    if code[j].op == "func_begin":
-                        depth += 1
-                    elif code[j].op == "func_end" and code[j].a == ins.a:
-                        depth -= 1
-                        if depth == 0:
-                            break
+                while j < len(code) and code[j].op != "func_end":
                     j += 1
-                self.funcs[ins.a] = {"params": ins.c or [], "entry": i + 1, "end": j}
+                self.funcs[ins.a] = {
+                    "params": ins.c or [],
+                    "entry": i + 1,
+                    "end": j,
+                }
 
     def run(self):
-        frames: list[dict] = [{}]  # frame 0 = top-level locals (== globals scope)
-        call_stack: list[tuple[int, str | None, dict]] = []  # (ret_pc, dest, caller_frame)
+        frames: list[dict] = [self.globals]
+        call_stack: list[tuple[int, str | None]] = []  # (return pc, dest temp)
         pc = 0
-        # skip function bodies at top level: jump over func_begin..func_end
-        in_func = lambda: len(call_stack) > 0 or cur_func is not None
-        cur_func: str | None = None
 
         def lookup(name):
             if name in frames[-1]:
@@ -51,103 +53,85 @@ class Interpreter:
             raise InterpError(f"runtime: undefined variable '{name}'")
 
         def store(name, val):
-            # inside a function: locals first, else globals if exists, else locals
-            if len(call_stack) > 0 or cur_func is not None:
-                if name in frames[-1]:
-                    frames[-1][name] = val
-                elif name in self.globals:
-                    self.globals[name] = val
-                else:
-                    frames[-1][name] = val
-            else:
-                # top-level: everything is global
-                if name in frames[-1]:
-                    frames[-1][name] = val
-                self.globals[name] = val
+            # Inside a function, locals live in the top frame; writing an
+            # existing global mutates the global. At top level frame 0 *is*
+            # the globals dict.
+            if len(frames) > 1 and name not in self.globals:
                 frames[-1][name] = val
+            else:
+                self.globals[name] = val
 
         def value_of(operand):
-            if isinstance(operand, str) and operand.startswith("@"):
-                return operand[1:]
-            if isinstance(operand, str) and operand[:1].isalpha() or isinstance(operand, str) and operand.startswith("_"):
-                # variable or temp
-                return lookup(operand)
-            return operand
+            if isinstance(operand, str):
+                if operand.startswith("@"):
+                    return operand[1:]          # string constant
+                return lookup(operand)          # variable or %temp
+            return operand                      # int / float / bool / None
 
         while pc < len(self.code):
             ins = self.code[pc]
             op = ins.op
+
             if op == "func_begin":
-                if call_stack and pc == call_stack[-1][0] - 1:
-                    pass  # entered via call, continue
-                else:
-                    # skip over function body when at top level
-                    pc = self.funcs[ins.a]["end"] + 1
-                    continue
-            elif op == "func_end":
-                # implicit fall-off: return None
-                if not call_stack:
-                    raise InterpError("runtime: fell off function without caller")
-                ret_pc, dest, caller = call_stack.pop()
-                frames.pop()
-                cur_func = None if not call_stack else cur_func
-                if dest is not None:
-                    # store None into caller frame temporarily
-                    frames[-1][dest] = None
-                    if dest in caller:
-                        pass
-                pc = ret_pc
+                # Sequential execution skips bodies; calls jump to entry.
+                pc = self.funcs[ins.a]["end"] + 1
                 continue
-            elif op == "label":
+
+            if op == "label":
                 pc += 1
                 continue
-            elif op == "assign":
+
+            if op == "assign":
                 store(ins.a, value_of(ins.b))
                 pc += 1
+
             elif op == "binop":
-                l = value_of(ins.b)
-                r = value_of(ins.extra)
-                frames[-1][ins.a] = self.apply_binop(ins.c, l, r)
-                if cur_func is None and not call_stack:
-                    self.globals[ins.a] = frames[-1][ins.a]
+                frames[-1][ins.a] = self.apply_binop(
+                    ins.c, value_of(ins.b), value_of(ins.extra)
+                )
                 pc += 1
+
             elif op == "unop":
-                v = value_of(ins.b)
-                frames[-1][ins.a] = self.apply_unop(ins.c, v)
-                if cur_func is None and not call_stack:
-                    self.globals[ins.a] = frames[-1][ins.a]
+                frames[-1][ins.a] = self.apply_unop(ins.c, value_of(ins.b))
                 pc += 1
+
             elif op == "goto":
                 pc = self.labels[ins.a]
+
             elif op == "ifFalse":
-                c = value_of(ins.a)
-                pc = self.labels[ins.b] if not c else pc + 1
+                pc = self.labels[ins.b] if not value_of(ins.a) else pc + 1
+
             elif op == "call":
                 args = [value_of(x) for x in (ins.b or [])]
-                pc = self.do_call(ins.c, args, ins.a, frames, call_stack, store, pc)
-                # do_call returns next pc (either next instr or func entry)
+                pc = self.do_call(ins.c, args, ins.a, frames, call_stack, pc)
+
             elif op == "return":
                 val = value_of(ins.a) if ins.a is not None else None
                 if not call_stack:
-                    if cur_func is None:
-                        raise InterpError("runtime: 'return' outside function")
-                    # returning from top-level wrapped? shouldn't happen
-                    pc += 1
-                else:
-                    ret_pc, dest, caller = call_stack.pop()
-                    frames.pop()
-                    cur_func = None if not call_stack else cur_func
-                    if dest is not None:
-                        frames[-1][dest] = val
-                        if not call_stack:
-                            self.globals[dest] = val
-                    pc = ret_pc
+                    raise InterpError("runtime: 'return' outside function")
+                ret_pc, dest = call_stack.pop()
+                frames.pop()
+                if dest is not None:
+                    frames[-1][dest] = val
+                pc = ret_pc
+
+            elif op == "func_end":
+                # Falling off a function returns None (void functions only;
+                # semantic analysis guarantees non-void functions return).
+                if not call_stack:
+                    raise InterpError("runtime: fell off a function without caller")
+                ret_pc, dest = call_stack.pop()
+                frames.pop()
+                if dest is not None:
+                    frames[-1][dest] = None
+                pc = ret_pc
+
             else:
                 raise InterpError(f"runtime: unknown op {op!r}")
+
         return self.globals
 
-    # -- helpers --
-    def do_call(self, name, args, dest, frames, call_stack, store_fn, pc):
+    def do_call(self, name, args, dest, frames, call_stack, pc):
         if name == "print":
             print(*args)
             if dest is not None:
@@ -162,7 +146,7 @@ class Interpreter:
         if name == "input":
             prompt = args[0] if args else ""
             try:
-                s = __builtins__.input(prompt) if not isinstance(__builtins__, dict) else __builtins__["input"](prompt)
+                s = builtins.input(prompt)
             except EOFError:
                 s = ""
             if dest is not None:
@@ -172,10 +156,11 @@ class Interpreter:
             raise InterpError(f"runtime: undefined function '{name}'")
         fn = self.funcs[name]
         if len(args) != len(fn["params"]):
-            raise InterpError(f"runtime: '{name}' expects {len(fn['params'])} args, got {len(args)}")
-        call_stack.append((pc + 1, dest, frames[-1]))
-        new_frame = dict(zip(fn["params"], args))
-        frames.append(new_frame)
+            raise InterpError(
+                f"runtime: '{name}' expects {len(fn['params'])} args, got {len(args)}"
+            )
+        call_stack.append((pc + 1, dest))
+        frames.append(dict(zip(fn["params"], args)))
         return fn["entry"]
 
     @staticmethod
@@ -207,6 +192,8 @@ class Interpreter:
                 return l and r
             if op == "or":
                 return l or r
+        except ZeroDivisionError:
+            raise InterpError("runtime: division by zero")
         except TypeError as e:
             raise InterpError(f"runtime: bad operands for '{op}': {e}")
         raise InterpError(f"runtime: unknown operator {op!r}")
@@ -214,7 +201,10 @@ class Interpreter:
     @staticmethod
     def apply_unop(op, v):
         if op == "-":
-            return -v
+            try:
+                return -v
+            except TypeError:
+                raise InterpError(f"runtime: unary '-' requires a number, got {v!r}")
         if op == "not":
             return not v
         raise InterpError(f"runtime: unknown unary {op!r}")

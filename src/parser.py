@@ -101,12 +101,6 @@ class Parser:
         if self.check(T.RETURN):
             return self.return_stmt()
         if self.check(T.LBRACE):
-            # bare block is flattened by callers that need scoping info?
-            # Keep as nested list marker via IfStmt-like? Instead parse and splice:
-            # We return a special Block handled in semantic/IR via list.
-            # Simplest: parse block inline and return a list wrapper.
-            # To keep types simple, parse into a Python list and let callers extend.
-            # Here we parse and return _Block.
             return self.block_stmt()
         # assign vs expression-statement: IDENT '=' (and next is not '==')
         if self.check(T.IDENT) and self.i + 1 < len(self.toks):
@@ -116,10 +110,10 @@ class Parser:
         return self.expr_stmt()
 
     def block_stmt(self):
-        self.expect(T.LBRACE, "'{'")
+        lb = self.expect(T.LBRACE, "'{'")
         stmts = self.stmt_list()
         self.expect(T.RBRACE, "'}'")
-        return _Block(stmts)
+        return A.Block(stmts, lb.line, lb.col)
 
     def let_stmt(self):
         kw = self.expect(T.LET, "'let'")
@@ -277,9 +271,3 @@ class Parser:
             self.expect(T.RPAREN, "')'")
             return e
         raise ParseError(f"{t.line}:{t.col}: unexpected {t.lexeme!r} in expression")
-
-
-class _Block:
-    """Internal bare `{ ... }` block; flattened into scopes by later phases."""
-    def __init__(self, stmts: list):
-        self.stmts = stmts

@@ -84,6 +84,13 @@ class ExprStmt:
     col: int = 0
 
 @dataclass
+class Block:
+    """Bare `{ ... }` block; opens a new lexical scope."""
+    stmts: list
+    line: int = 0
+    col: int = 0
+
+@dataclass
 class Param:
     name: str
     ann: Optional[str]  # None => unchecked (accepts anything)
