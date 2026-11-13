@@ -1,12 +1,4 @@
-"""Spelling suggestions for compiler diagnostics.
-
-Uses optimal-string-alignment distance (Levenshtein + adjacent transposition),
-which is what users expect for typos like `lenght` -> `length`.
-"""
-
-
 def distance(a: str, b: str) -> int:
-    """Optimal string alignment distance between two strings."""
     if a == b:
         return 0
     if not a:
@@ -32,7 +24,6 @@ def distance(a: str, b: str) -> int:
 
 
 def closest(name: str, candidates, max_distance: int | None = None) -> str | None:
-    """Return the closest candidate, or None when nothing is close enough."""
     if len(name) < 3:
         return None
     if max_distance is None:

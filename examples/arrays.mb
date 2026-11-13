@@ -1,4 +1,4 @@
-# arrays.mb - list literals, indexing and mutation
+# arrays.mb - listas: literales, índices y mutación (las listas viven en el heap)
 let numbers: list = [10, 20, 30, 40];
 
 let i: int = 0;

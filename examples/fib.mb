@@ -1,4 +1,4 @@
-# fib.mb - recursion + while loop
+# fib.mb - recursión y ciclo while (cada llamada apila un marco)
 fn fib(n: int) -> int {
   if (n <= 1) {
     return n;

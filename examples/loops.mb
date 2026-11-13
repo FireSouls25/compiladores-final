@@ -1,4 +1,4 @@
-# loops.mb - for, break, continue and nested loops
+# loops.mb - for, break, continue y ciclos anidados
 let total: int = 0;
 
 for (let i = 0; i < 10; i = i + 1) {

@@ -1,19 +1,3 @@
-"""Phase 3: Semantic analysis. AST -> typed AST checks + symbol table.
-
-Checks: scopes, redeclare, undefined vars, type mismatches, arity,
-return types, bool conditions, all-path returns. Allows int->float promotion.
-`None` annotation on params means unchecked (accepts anything).
-
-This phase also *resolves* every variable reference to a unique name so that
-block shadowing survives the flat IR:
-
-    let x = 1;
-    if (True) { let x = 2; print(x); }   # inner x -> x$1
-    print(x);                            # outer x -> x
-
-Resolution is stored on the AST (`LetStmt.resolved_name`, `AssignStmt.resolved`,
-`Var.resolved`) and consumed by the IR generator / Python backend.
-"""
 from . import ast_nodes as A
 from .suggest import closest
 
@@ -25,10 +9,9 @@ class SemanticError(Exception):
 NUMERIC = {"int", "float"}
 
 BUILTINS = {
-    # name: (param_types, return_type, variadic)
     "print": (["unknown"], "None", True),
     "len": (["str"], "int", False),
-    "input": ([], "str", True),  # input() or input(prompt: str)
+    "input": ([], "str", True),
 }
 
 
@@ -43,7 +26,6 @@ def assignable(expected: str, actual: str) -> bool:
 
 
 def _stmt_always_returns(s) -> bool:
-    """True when a statement returns on every execution path."""
     if isinstance(s, A.ReturnStmt):
         return True
     if isinstance(s, A.Block):
@@ -55,7 +37,6 @@ def _stmt_always_returns(s) -> bool:
             and _block_always_returns(s.else_body)
         )
     if isinstance(s, A.WhileStmt):
-        # `while (True) { ... }` is the only loop that can guarantee a return.
         cond = s.cond
         return (
             isinstance(cond, A.Literal)
@@ -71,7 +52,6 @@ def _block_always_returns(stmts: list) -> bool:
 
 
 def _top_level_globals(items: list) -> list[str]:
-    """Resolved names declared by top-level `let` statements (for the VM)."""
     names: list[str] = []
 
     def walk(stmts):
@@ -87,44 +67,75 @@ def _top_level_globals(items: list) -> list[str]:
     return names
 
 
+def _top_level_names(items: list) -> set[str]:
+    names: set[str] = set()
+
+    def walk(stmts):
+        for s in stmts:
+            if isinstance(s, A.LetStmt):
+                names.add(s.name)
+            elif isinstance(s, A.Block):
+                walk(s.stmts)
+            elif isinstance(s, A.ForStmt) and isinstance(s.init, A.LetStmt):
+                names.add(s.init.name)
+
+    walk(items)
+    return names
+
+
 class SemanticAnalyzer:
-    def __init__(self):
+    def __init__(self, traza: list | None = None):
+        self.traza = traza
+        self.scope_names: list[str] = ["global"]
         self.errors: list[str] = []
-        self.scopes: list[dict] = [{}]  # name -> {'kind','type','resolved'}
-        self.functions: dict = {}  # name -> {'params':[(n,t)], 'ret':t}
+        self.scopes: list[dict] = [{}]
+        self.functions: dict = {}
         self.current_ret: str | None = None
         self.current_fn: str | None = None
         self.has_return: bool = False
         self.loop_depth: int = 0
         self._fresh = 0
+        self.global_names: set[str] = set()
 
-    # -- scope helpers --
-    def push(self):
+    def log(self, msg: str):
+        if self.traza is not None:
+            self.traza.append("  " * (len(self.scopes) - 1) + msg)
+
+    def push(self, nombre: str = "bloque"):
+        self.log(f"→ Entrando al ámbito '{nombre}'")
         self.scopes.append({})
+        self.scope_names.append(nombre)
 
     def pop(self):
-        self.scopes.pop()
+        nombre = self.scope_names.pop()
+        locales = ", ".join(self.scopes.pop()) or "ninguna"
+        self.log(f"← Saliendo del ámbito '{nombre}' (se destruyen: {locales})")
+
+    def check_assignable(self, expected: str, actual: str) -> bool:
+        ok = assignable(expected, actual)
+        if ok and expected == "float" and actual == "int":
+            self.log("[COERCIÓN] int → float (conversión implícita segura)")
+        return ok
 
     def _unique(self, name: str) -> str:
         self._fresh += 1
         return f"{name}${self._fresh}"
 
     def declare(self, name, info, line, col):
-        """Declare a name in the current scope.
-
-        Re-declaring in the *same* scope is an error. Declaring a name that
-        exists in an *outer* scope is shadowing and gets a unique resolved name.
-        """
         if name in BUILTINS:
-            self.err(line, col, f"cannot declare '{name}': it is a builtin")
+            self.err(line, col, f"no se puede declarar '{name}': es una función integrada")
         if name in self.functions:
-            self.err(line, col, f"cannot declare '{name}': it is already a function")
+            self.err(line, col, f"no se puede declarar '{name}': ya es una función")
         if name in self.scopes[-1]:
-            self.errors.append(f"{line}:{col}: redeclaration of '{name}' in same scope")
+            self.err(line, col, f"redeclaración de '{name}' en el mismo ámbito")
             return {**info, "resolved": name}
-        shadowed = self.lookup(name) is not None
+        shadowed = self.lookup(name) is not None or (
+            self.current_fn is not None and name in self.global_names
+        )
         info = {**info, "resolved": self._unique(name) if shadowed else name}
         self.scopes[-1][name] = info
+        extra = f" → renombrada a {info['resolved']} (sombrea a otra)" if shadowed else ""
+        self.log(f"[DECLARACIÓN] {name}: {info['type']} en ámbito '{self.scope_names[-1]}'{extra}")
         return info
 
     def lookup(self, name):
@@ -133,7 +144,14 @@ class SemanticAnalyzer:
                 return s[name]
         return None
 
+    def lookup_scope(self, name) -> str:
+        for s, nombre in zip(reversed(self.scopes), reversed(self.scope_names)):
+            if name in s:
+                return nombre
+        return "?"
+
     def err(self, line, col, msg):
+        self.log(f"[ERROR] {line}:{col}: {msg}")
         self.errors.append(f"{line}:{col}: {msg}")
 
     def visible_names(self) -> set[str]:
@@ -143,27 +161,29 @@ class SemanticAnalyzer:
         return names
 
     def undefined_variable(self, name, line, col):
-        msg = f"undefined variable '{name}'"
+        msg = f"variable no definida '{name}'"
         suggestion = closest(name, self.visible_names())
         if suggestion is not None:
-            msg += f" (did you mean '{suggestion}'?)"
+            msg += f" (¿quisiste decir '{suggestion}'?)"
         elif name in self.functions:
-            msg += f" (did you mean to call '{name}(...)'?)"
+            msg += f" (¿quisiste llamar a '{name}(...)'?)"
         self.err(line, col, msg)
 
-    # -- entry --
     def analyze(self, prog: A.Program) -> dict:
-        # pass 1: register all function signatures (allows forward calls)
+        self.global_names = _top_level_names(prog.items)
+        self.log("Pasada 1: se registran las firmas de las funciones (permite llamarlas antes de definirlas)")
         for it in prog.items:
             if isinstance(it, A.FuncDef):
                 if it.name in self.functions or it.name in BUILTINS:
-                    self.err(it.line, it.col, f"redefinition of function '{it.name}'")
+                    self.err(it.line, it.col, f"redefinición de la función '{it.name}'")
                 else:
                     self.functions[it.name] = {
                         "params": [(p.name, p.ann or "unknown") for p in it.params],
                         "ret": it.ret,
                     }
-        # pass 2: check bodies + top-level statements
+                    firma = ", ".join(f"{n}: {t}" for n, t in self.functions[it.name]["params"])
+                    self.log(f"  función {it.name}({firma}) -> {it.ret}")
+        self.log("Pasada 2: se recorren los cuerpos de las funciones y las sentencias")
         for it in prog.items:
             if isinstance(it, A.FuncDef):
                 self.check_func(it)
@@ -174,7 +194,7 @@ class SemanticAnalyzer:
         return {"functions": self.functions, "globals": _top_level_globals(prog.items)}
 
     def check_func(self, fn: A.FuncDef):
-        self.push()
+        self.push(f"función {fn.name}")
         self.current_ret = fn.ret
         self.current_fn = fn.name
         self.has_return = False
@@ -182,24 +202,27 @@ class SemanticAnalyzer:
         seen = set()
         for p in fn.params:
             if p.name in seen:
-                self.err(p.line, p.col, f"duplicate parameter '{p.name}'")
+                self.err(p.line, p.col, f"parámetro duplicado '{p.name}'")
             if p.name in BUILTINS:
-                self.err(p.line, p.col, f"parameter '{p.name}' shadows a builtin")
+                self.err(p.line, p.col, f"el parámetro '{p.name}' oculta una función integrada")
             if p.name in self.functions:
-                self.err(p.line, p.col, f"parameter '{p.name}' shadows a function")
+                self.err(p.line, p.col, f"el parámetro '{p.name}' oculta una función")
             seen.add(p.name)
+            resolved = self._unique(p.name) if p.name in self.global_names else p.name
+            p.resolved = resolved
             self.scopes[-1][p.name] = {
                 "kind": "param",
                 "type": p.ann or "unknown",
-                "resolved": p.name,
+                "resolved": resolved,
             }
+            self.log(f"[DECLARACIÓN] {p.name}: {p.ann or 'unknown'} (parámetro)")
         for s in fn.body:
             self.check_stmt(s)
         if fn.ret != "None" and not _block_always_returns(fn.body):
             self.err(
                 fn.line,
                 fn.col,
-                f"function '{fn.name}' must return '{fn.ret}' on all paths",
+                f"la función '{fn.name}' debe retornar '{fn.ret}' en todos los caminos",
             )
         self.pop()
         self.current_ret = None
@@ -207,7 +230,7 @@ class SemanticAnalyzer:
 
     def check_stmt(self, s):
         if isinstance(s, A.Block):
-            self.push()
+            self.push("bloque { }")
             for x in s.stmts:
                 self.check_stmt(x)
             self.pop()
@@ -215,8 +238,8 @@ class SemanticAnalyzer:
         if isinstance(s, A.LetStmt):
             t = self.check_expr(s.expr)
             if s.ann:
-                if not assignable(s.ann, t):
-                    self.err(s.line, s.col, f"cannot assign '{t}' to '{s.ann}' in 'let {s.name}'")
+                if not self.check_assignable(s.ann, t):
+                    self.err(s.line, s.col, f"no se puede asignar '{t}' a '{s.ann}' en 'let {s.name}'")
                 info = self.declare(s.name, {"kind": "var", "type": s.ann}, s.line, s.col)
             else:
                 info = self.declare(s.name, {"kind": "var", "type": t}, s.line, s.col)
@@ -229,36 +252,39 @@ class SemanticAnalyzer:
             else:
                 s.resolved = info["resolved"]
                 t = self.check_expr(s.expr)
-                if not assignable(info["type"], t):
-                    self.err(s.line, s.col, f"cannot assign '{t}' to variable '{s.name}' of type '{info['type']}'")
+                if not self.check_assignable(info["type"], t):
+                    self.err(s.line, s.col, f"no se puede asignar '{t}' a la variable '{s.name}' de tipo '{info['type']}'")
         elif isinstance(s, A.IfStmt):
             t = self.check_expr(s.cond)
             if t != "bool":
-                self.err(s.line, s.col, f"'if' condition must be bool, got '{t}'")
-            self.push()
+                self.err(s.line, s.col, f"la condición del 'if' debe ser bool, se obtuvo '{t}'")
+            else:
+                self.log("[TIPOS] condición del if: bool ✓")
+            self.push("if")
             for x in s.then_body:
                 self.check_stmt(x)
             self.pop()
-            self.push()
-            for x in s.else_body:
-                self.check_stmt(x)
-            self.pop()
+            if s.else_body:
+                self.push("else")
+                for x in s.else_body:
+                    self.check_stmt(x)
+                self.pop()
         elif isinstance(s, A.WhileStmt):
             t = self.check_expr(s.cond)
             if t != "bool":
-                self.err(s.line, s.col, f"'while' condition must be bool, got '{t}'")
-            self.push()
+                self.err(s.line, s.col, f"la condición del 'while' debe ser bool, se obtuvo '{t}'")
+            self.push("while")
             self.loop_depth += 1
             for x in s.body:
                 self.check_stmt(x)
             self.loop_depth -= 1
             self.pop()
         elif isinstance(s, A.ForStmt):
-            self.push()
+            self.push("for")
             self.check_stmt(s.init)
             t = self.check_expr(s.cond)
             if t != "bool":
-                self.err(s.line, s.col, f"'for' condition must be bool, got '{t}'")
+                self.err(s.line, s.col, f"la condición del 'for' debe ser bool, se obtuvo '{t}'")
             self.check_stmt(s.update)
             self.loop_depth += 1
             for x in s.body:
@@ -267,33 +293,32 @@ class SemanticAnalyzer:
             self.pop()
         elif isinstance(s, A.BreakStmt):
             if self.loop_depth == 0:
-                self.err(s.line, s.col, "'break' outside loop")
+                self.err(s.line, s.col, "'break' fuera de un ciclo")
         elif isinstance(s, A.ContinueStmt):
             if self.loop_depth == 0:
-                self.err(s.line, s.col, "'continue' outside loop")
+                self.err(s.line, s.col, "'continue' fuera de un ciclo")
         elif isinstance(s, A.SetIndexStmt):
             tt = self.check_expr(s.target)
             it = self.check_expr(s.index)
             self.check_expr(s.expr)
             if tt not in ("list", "unknown"):
-                self.err(s.line, s.col, f"cannot assign to an index of '{tt}'")
+                self.err(s.line, s.col, f"no se puede asignar a un índice de '{tt}'")
             if it not in ("int", "unknown"):
-                self.err(s.line, s.col, f"list index must be int, got '{it}'")
+                self.err(s.line, s.col, f"el índice de la lista debe ser int, se obtuvo '{it}'")
         elif isinstance(s, A.ReturnStmt):
             if self.current_ret is None:
-                self.err(s.line, s.col, "'return' outside function")
+                self.err(s.line, s.col, "'return' fuera de una función")
                 return
             self.has_return = True
             actual = "None" if s.expr is None else self.check_expr(s.expr)
-            # bare `return;` inside non-None function: still counts but is an error
             if s.expr is None and self.current_ret != "None":
-                self.err(s.line, s.col, f"function '{self.current_fn}' must return '{self.current_ret}', got empty return")
-            elif not assignable(self.current_ret, actual):
-                self.err(s.line, s.col, f"return type mismatch: expected '{self.current_ret}', got '{actual}'")
+                self.err(s.line, s.col, f"la función '{self.current_fn}' debe retornar '{self.current_ret}', pero el return está vacío")
+            elif not self.check_assignable(self.current_ret, actual):
+                self.err(s.line, s.col, f"tipo de retorno incorrecto: se esperaba '{self.current_ret}', se obtuvo '{actual}'")
         elif isinstance(s, A.ExprStmt):
             self.check_expr(s.expr)
         else:
-            self.err(getattr(s, "line", 0), getattr(s, "col", 0), f"unknown statement {type(s).__name__}")
+            self.err(getattr(s, "line", 0), getattr(s, "col", 0), f"sentencia desconocida {type(s).__name__}")
 
     def check_expr(self, e) -> str:
         if isinstance(e, A.Literal):
@@ -304,6 +329,7 @@ class SemanticAnalyzer:
                 self.undefined_variable(e.name, e.line, e.col)
                 return "unknown"
             e.resolved = info["resolved"]
+            self.log(f"[USO] {e.name} → {info['type']} (encontrada en ámbito '{self.lookup_scope(e.name)}')")
             return info["type"]
         if isinstance(e, A.ListLit):
             for item in e.items:
@@ -313,28 +339,31 @@ class SemanticAnalyzer:
             tt = self.check_expr(e.target)
             it = self.check_expr(e.index)
             if it not in ("int", "unknown"):
-                self.err(e.line, e.col, f"index must be int, got '{it}'")
+                self.err(e.line, e.col, f"el índice debe ser int, se obtuvo '{it}'")
             if tt == "str":
                 return "str"
             if tt == "list":
                 return "unknown"
             if tt != "unknown":
-                self.err(e.line, e.col, f"cannot index a value of type '{tt}'")
+                self.err(e.line, e.col, f"no se puede indexar un valor de tipo '{tt}'")
             return "unknown"
         if isinstance(e, A.UnaryOp):
             t = self.check_expr(e.operand)
             if e.op == "not":
                 if t != "bool":
-                    self.err(e.line, e.col, f"'not' requires bool, got '{t}'")
+                    self.err(e.line, e.col, f"'not' requiere bool, se obtuvo '{t}'")
                 return "bool"
             if e.op == "-":
                 if t not in NUMERIC and t != "unknown":
-                    self.err(e.line, e.col, f"unary '-' requires numeric, got '{t}'")
+                    self.err(e.line, e.col, f"el '-' unario requiere un número, se obtuvo '{t}'")
                 return t
         if isinstance(e, A.BinOp):
             lt = self.check_expr(e.left)
             rt = self.check_expr(e.right)
-            return self.check_binop(e.op, lt, rt, e.line, e.col)
+            res = self.check_binop(e.op, lt, rt, e.line, e.col)
+            if res != "unknown" or "unknown" in (lt, rt):
+                self.log(f"[TIPOS] {lt} {e.op} {rt} → {res}")
+            return res
         if isinstance(e, A.Call):
             arg_ts = [self.check_expr(a) for a in e.args]
             if e.name in BUILTINS:
@@ -343,54 +372,53 @@ class SemanticAnalyzer:
                     return "None"
                 if e.name == "input":
                     if len(arg_ts) > 1 or (len(arg_ts) == 1 and arg_ts[0] not in ("str", "unknown")):
-                        self.err(e.line, e.col, "'input' takes 0 args or 1 str prompt")
+                        self.err(e.line, e.col, "'input' recibe 0 argumentos o 1 mensaje de tipo str")
                     return "str"
-                # len
                 if e.name == "len":
                     if len(arg_ts) != 1:
-                        self.err(e.line, e.col, f"'len' expects 1 arg(s), got {len(arg_ts)}")
+                        self.err(e.line, e.col, f"'len' espera 1 argumento, se obtuvieron {len(arg_ts)}")
                     elif arg_ts[0] not in ("str", "list", "unknown"):
-                        self.err(e.line, e.col, f"'len' expects 'str' or 'list', got '{arg_ts[0]}'")
+                        self.err(e.line, e.col, f"'len' espera 'str' o 'list', se obtuvo '{arg_ts[0]}'")
                     return "int"
             sig = self.functions.get(e.name)
             if sig is None:
-                msg = f"undefined function '{e.name}'"
+                msg = f"función no definida '{e.name}'"
                 suggestion = closest(
                     e.name, list(self.functions) + list(BUILTINS)
                 )
                 if suggestion is not None:
-                    msg += f" (did you mean '{suggestion}'?)"
+                    msg += f" (¿quisiste decir '{suggestion}'?)"
                 elif self.lookup(e.name) is not None:
-                    msg += f" (variable '{e.name}' is not callable)"
+                    msg += f" (la variable '{e.name}' no es invocable)"
                 self.err(e.line, e.col, msg)
                 return "unknown"
             exp = sig["params"]
             if len(exp) != len(arg_ts):
-                self.err(e.line, e.col, f"'{e.name}' expects {len(exp)} arg(s), got {len(arg_ts)}")
+                self.err(e.line, e.col, f"'{e.name}' espera {len(exp)} argumento(s), se obtuvieron {len(arg_ts)}")
             else:
+                self.log(f"[LLAMADA] {e.name}({', '.join(arg_ts)}) → {sig['ret']}")
                 for (pn, pt), at in zip(exp, arg_ts):
-                    if not assignable(pt, at):
-                        self.err(e.line, e.col, f"'{e.name}' param '{pn}' expects '{pt}', got '{at}'")
+                    if not self.check_assignable(pt, at):
+                        self.err(e.line, e.col, f"el parámetro '{pn}' de '{e.name}' espera '{pt}', se obtuvo '{at}'")
             return sig["ret"]
-        self.err(getattr(e, "line", 0), getattr(e, "col", 0), f"unknown expression {type(e).__name__}")
+        self.err(getattr(e, "line", 0), getattr(e, "col", 0), f"expresión desconocida {type(e).__name__}")
         return "unknown"
 
     def check_binop(self, op, lt, rt, line, col) -> str:
         if op in ("and", "or"):
             if lt != "bool" or rt != "bool":
-                self.err(line, col, f"'{op}' requires bools, got '{lt}' and '{rt}'")
+                self.err(line, col, f"'{op}' requiere bool, se obtuvo '{lt}' y '{rt}'")
             return "bool"
         if op in ("==", "!="):
             if lt != rt and not (lt in NUMERIC and rt in NUMERIC) and "unknown" not in (lt, rt):
-                self.err(line, col, f"cannot compare '{lt}' with '{rt}'")
+                self.err(line, col, f"no se puede comparar '{lt}' con '{rt}'")
             return "bool"
         if op in ("<", "<=", ">", ">="):
             if lt not in NUMERIC and lt != "unknown":
-                self.err(line, col, f"'{op}' requires numbers, got '{lt}'")
+                self.err(line, col, f"'{op}' requiere números, se obtuvo '{lt}'")
             if rt not in NUMERIC and rt != "unknown":
-                self.err(line, col, f"'{op}' requires numbers, got '{rt}'")
+                self.err(line, col, f"'{op}' requiere números, se obtuvo '{rt}'")
             return "bool"
-        # arithmetic
         if op == "+":
             if lt == "str" and rt == "str":
                 return "str"
@@ -398,7 +426,7 @@ class SemanticAnalyzer:
                 return "float" if "float" in (lt, rt) else "int"
             if "unknown" in (lt, rt):
                 return "unknown"
-            self.err(line, col, f"cannot apply '+' to '{lt}' and '{rt}'")
+            self.err(line, col, f"no se puede aplicar '+' a '{lt}' y '{rt}'")
             return "unknown"
         if op in ("-", "*", "/", "%"):
             if op == "*" and ((lt == "str" and rt == "int") or (lt == "int" and rt == "str")):
@@ -409,6 +437,6 @@ class SemanticAnalyzer:
                 return "float" if "float" in (lt, rt) else "int"
             if "unknown" in (lt, rt):
                 return "unknown"
-            self.err(line, col, f"cannot apply '{op}' to '{lt}' and '{rt}'")
+            self.err(line, col, f"no se puede aplicar '{op}' a '{lt}' y '{rt}'")
             return "unknown"
         return "unknown"

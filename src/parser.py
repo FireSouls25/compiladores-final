@@ -1,4 +1,3 @@
-"""Phase 2: Parser (syntactic analysis). Tokens -> AST (recursive descent)."""
 from . import tokens as T
 from . import ast_nodes as A
 from .suggest import closest
@@ -13,7 +12,6 @@ class Parser:
         self.toks = toks
         self.i = 0
 
-    # -- helpers --
     def peek(self):
         return self.toks[self.i]
 
@@ -40,10 +38,9 @@ class Parser:
         if self.check(type_):
             return self.advance()
         t = self.peek()
-        found = "end of file" if t.type == T.EOF else repr(t.lexeme)
-        raise ParseError(f"{t.line}:{t.col}: expected {what}, found {found}")
+        found = "fin de archivo" if t.type == T.EOF else repr(t.lexeme)
+        raise ParseError(f"{t.line}:{t.col}: se esperaba {what}, se encontró {found}")
 
-    # -- entry --
     def parse(self) -> A.Program:
         items = []
         while not self.at_end():
@@ -53,10 +50,9 @@ class Parser:
                 items.append(self.stmt())
         return A.Program(items)
 
-    # fn name(a: int, b: int) -> int { ... }
     def func_def(self) -> A.FuncDef:
         fn = self.expect(T.FN, "'fn'")
-        name = self.expect(T.IDENT, "function name")
+        name = self.expect(T.IDENT, "nombre de función")
         self.expect(T.LPAREN, "'('")
         params: list[A.Param] = []
         if not self.check(T.RPAREN):
@@ -73,7 +69,7 @@ class Parser:
         return A.FuncDef(name.lexeme, params, ret, body, fn.line, fn.col)
 
     def param(self) -> A.Param:
-        t = self.expect(T.IDENT, "parameter name")
+        t = self.expect(T.IDENT, "nombre de parámetro")
         ann = None
         if self.match(T.COLON):
             ann = self.type_name()
@@ -85,11 +81,11 @@ class Parser:
              T.TYPE_BOOL: "bool", T.TYPE_LIST: "list", T.NONE: "None"}
         if t.type in m:
             return m[t.type]
-        found = "end of file" if t.type == T.EOF else repr(t.lexeme)
-        msg = f"expected a type (int/float/str/bool/list/None), found {found}"
+        found = "fin de archivo" if t.type == T.EOF else repr(t.lexeme)
+        msg = f"se esperaba un tipo (int/float/str/bool/list/None), se encontró {found}"
         suggestion = closest(t.lexeme, ["int", "float", "str", "bool", "list", "None"], max_distance=3)
         if suggestion is not None:
-            msg += f" (did you mean '{suggestion}'?)"
+            msg += f" (¿quisiste decir '{suggestion}'?)"
         raise ParseError(f"{t.line}:{t.col}: {msg}")
 
     def stmt_list(self) -> list:
@@ -115,12 +111,10 @@ class Parser:
             return self.return_stmt()
         if self.check(T.LBRACE):
             return self.block_stmt()
-        # assign vs expression-statement: IDENT '=' (and next is not '==')
         if self.check(T.IDENT) and self.i + 1 < len(self.toks):
             nxt = self.toks[self.i + 1]
             if nxt.type == T.EQ:
                 return self.assign_stmt()
-            # Catch misspelled statement keywords: `whil (...)`, `retrun ...`
             if nxt.type in (T.LPAREN, T.LBRACE):
                 t = self.peek()
                 if len(t.lexeme) >= 4:
@@ -129,8 +123,8 @@ class Parser:
                     suggestion = closest(t.lexeme, control, max_distance=1)
                     if suggestion is not None:
                         raise ParseError(
-                            f"{t.line}:{t.col}: unknown keyword '{t.lexeme}' "
-                            f"(did you mean '{suggestion}'?)"
+                            f"{t.line}:{t.col}: palabra clave desconocida '{t.lexeme}' "
+                            f"(¿quisiste decir '{suggestion}'?)"
                         )
         return self.expr_stmt()
 
@@ -142,7 +136,7 @@ class Parser:
 
     def let_stmt(self):
         kw = self.expect(T.LET, "'let'")
-        name = self.expect(T.IDENT, "variable name")
+        name = self.expect(T.IDENT, "nombre de variable")
         ann = None
         if self.match(T.COLON):
             ann = self.type_name()
@@ -152,7 +146,7 @@ class Parser:
         return A.LetStmt(name.lexeme, ann, e, kw.line, kw.col)
 
     def assign_stmt(self):
-        name = self.expect(T.IDENT, "variable name")
+        name = self.expect(T.IDENT, "nombre de variable")
         self.expect(T.EQ, "'='")
         e = self.expr()
         self.expect(T.SEMI, "';'")
@@ -160,7 +154,7 @@ class Parser:
 
     def if_stmt(self):
         kw = self.expect(T.IF, "'if'")
-        self.expect(T.LPAREN, "'(' after 'if'")
+        self.expect(T.LPAREN, "'(' después de 'if'")
         cond = self.expr()
         self.expect(T.RPAREN, "')'")
         self.expect(T.LBRACE, "'{'")
@@ -169,16 +163,16 @@ class Parser:
         else_b: list = []
         if self.match(T.ELSE):
             if self.check(T.IF):
-                else_b = [self.if_stmt()]  # else-if chain
+                else_b = [self.if_stmt()]
             else:
-                self.expect(T.LBRACE, "'{' after 'else'")
+                self.expect(T.LBRACE, "'{' después de 'else'")
                 else_b = self.stmt_list()
                 self.expect(T.RBRACE, "'}'")
         return A.IfStmt(cond, then_b, else_b, kw.line, kw.col)
 
     def while_stmt(self):
         kw = self.expect(T.WHILE, "'while'")
-        self.expect(T.LPAREN, "'(' after 'while'")
+        self.expect(T.LPAREN, "'(' después de 'while'")
         cond = self.expr()
         self.expect(T.RPAREN, "')'")
         self.expect(T.LBRACE, "'{'")
@@ -188,11 +182,11 @@ class Parser:
 
     def for_stmt(self):
         kw = self.expect(T.FOR, "'for'")
-        self.expect(T.LPAREN, "'(' after 'for'")
+        self.expect(T.LPAREN, "'(' después de 'for'")
         init = self.for_head()
-        self.expect(T.SEMI, "';' after 'for' initializer")
+        self.expect(T.SEMI, "';' después del inicializador del 'for'")
         cond = self.expr()
-        self.expect(T.SEMI, "';' after 'for' condition")
+        self.expect(T.SEMI, "';' después de la condición del 'for'")
         update = self.for_head()
         self.expect(T.RPAREN, "')'")
         self.expect(T.LBRACE, "'{'")
@@ -201,10 +195,9 @@ class Parser:
         return A.ForStmt(init, cond, update, body, kw.line, kw.col)
 
     def for_head(self):
-        """Parse `let i = ...`, `i = ...` or an expression (no semicolon)."""
         if self.check(T.LET):
             kw = self.expect(T.LET, "'let'")
-            name = self.expect(T.IDENT, "variable name")
+            name = self.expect(T.IDENT, "nombre de variable")
             ann = None
             if self.match(T.COLON):
                 ann = self.type_name()
@@ -213,7 +206,7 @@ class Parser:
             return A.LetStmt(name.lexeme, ann, e, kw.line, kw.col)
         if self.check(T.IDENT) and self.i + 1 < len(self.toks):
             if self.toks[self.i + 1].type == T.EQ:
-                name = self.expect(T.IDENT, "variable name")
+                name = self.expect(T.IDENT, "nombre de variable")
                 self.expect(T.EQ, "'='")
                 e = self.expr()
                 return A.AssignStmt(name.lexeme, e, name.line, name.col)
@@ -241,7 +234,7 @@ class Parser:
                 self.expect(T.SEMI, "';'")
                 return A.SetIndexStmt(e.target, e.index, val, e.line, e.col)
             raise ParseError(
-                f"{getattr(e, 'line', 0)}:{getattr(e, 'col', 0)}: invalid assignment target"
+                f"{getattr(e, 'line', 0)}:{getattr(e, 'col', 0)}: destino de asignación inválido"
             )
         t = self.peek()
         self.expect(T.SEMI, "';'")
@@ -249,7 +242,6 @@ class Parser:
         col = getattr(e, "col", t.col)
         return A.ExprStmt(e, line, col)
 
-    # -- expressions (precedence climbing) --
     def expr(self):
         return self.or_expr()
 
@@ -337,7 +329,7 @@ class Parser:
             return A.ListLit(items, t.line, t.col)
         if self.match(T.IDENT):
             if self.check(T.LPAREN):
-                self.advance()  # '('
+                self.advance()
                 args = []
                 if not self.check(T.RPAREN):
                     args.append(self.expr())
@@ -355,4 +347,5 @@ class Parser:
             e = self.expr()
             self.expect(T.RPAREN, "')'")
             return e
-        raise ParseError(f"{t.line}:{t.col}: unexpected {t.lexeme!r} in expression")
+        found = "fin de archivo" if t.type == T.EOF else repr(t.lexeme)
+        raise ParseError(f"{t.line}:{t.col}: {found} inesperado en una expresión")

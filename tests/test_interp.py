@@ -35,12 +35,12 @@ class InterpreterTests(unittest.TestCase):
 
     def test_division_by_zero_is_a_clean_error(self):
         _, sym, ir = compile_pipeline("let a = 1; let b = 0; print(a / b);")
-        with self.assertRaisesRegex(InterpError, "division by zero"):
+        with self.assertRaisesRegex(InterpError, "división por cero"):
             Interpreter(ir, sym["globals"]).run()
 
     def test_modulo_by_zero_is_a_clean_error(self):
         _, sym, ir = compile_pipeline("print(5 % 0);")
-        with self.assertRaisesRegex(InterpError, "division by zero"):
+        with self.assertRaisesRegex(InterpError, "división por cero"):
             Interpreter(ir, sym["globals"]).run()
 
     def test_strings_floats_bools(self):

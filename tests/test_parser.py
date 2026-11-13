@@ -50,15 +50,15 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, A.Block)
 
     def test_missing_semicolon(self):
-        with self.assertRaisesRegex(ParseError, r"1:10: expected ';'"):
+        with self.assertRaisesRegex(ParseError, r"1:10: se esperaba ';'"):
             parse("let x = 1")
 
     def test_error_at_eof_is_readable(self):
-        with self.assertRaisesRegex(ParseError, "end of file"):
+        with self.assertRaisesRegex(ParseError, "fin de archivo"):
             parse("fn f(a: int")
 
     def test_unexpected_expression(self):
-        with self.assertRaisesRegex(ParseError, "unexpected"):
+        with self.assertRaisesRegex(ParseError, "inesperado"):
             parse("let x = ;")
 
 

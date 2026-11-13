@@ -1,4 +1,3 @@
-"""Shared helpers for the MiniB test suite."""
 import contextlib
 import io
 import sys
@@ -18,7 +17,6 @@ from src.py_codegen import generate_python
 
 
 def compile_pipeline(source: str, opt: bool = False):
-    """Run every phase and return (program, symbols, IR)."""
     tokens = Lexer(source).tokenize()
     prog = Parser(tokens).parse()
     sym = SemanticAnalyzer().analyze(prog)
@@ -29,7 +27,6 @@ def compile_pipeline(source: str, opt: bool = False):
 
 
 def run_source(source: str, opt: bool = False) -> str:
-    """Compile and execute `source`, returning captured stdout."""
     prog, sym, ir = compile_pipeline(source, opt=opt)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -42,7 +39,6 @@ def example(name: str) -> str:
 
 
 def run_python(code: str) -> str:
-    """Execute generated Python in-process and return captured stdout."""
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         exec(compile(code, "<generated>", "exec"), {"__name__": "__main__"})

@@ -47,15 +47,15 @@ class LoopAndListParserTests(unittest.TestCase):
         self.assertEqual(stmt.target.name, "a")
 
     def test_invalid_assignment_target(self):
-        with self.assertRaisesRegex(Exception, "invalid assignment target"):
+        with self.assertRaisesRegex(Exception, "destino de asignación inválido"):
             parse("1 + 2 = 3;")
 
     def test_break_requires_semicolon(self):
-        with self.assertRaisesRegex(Exception, "expected ';'"):
+        with self.assertRaisesRegex(Exception, "se esperaba ';'"):
             parse("while (True) { break }")
 
     def test_for_syntax_errors(self):
-        with self.assertRaisesRegex(Exception, "';' after 'for' initializer"):
+        with self.assertRaisesRegex(Exception, "';' después del inicializador del 'for'"):
             parse("for (let i = 0 i < 3; i = i + 1) { }")
 
 
@@ -65,37 +65,37 @@ class LoopAndListSemanticTests(unittest.TestCase):
             compile_pipeline(source)
 
     def test_break_and_continue_only_in_loops(self):
-        self.assert_error("break;", "'break' outside loop")
-        self.assert_error("continue;", "'continue' outside loop")
+        self.assert_error("break;", "'break' fuera de un ciclo")
+        self.assert_error("continue;", "'continue' fuera de un ciclo")
         compile_pipeline("while (True) { break; }")
         compile_pipeline("for (let i = 0; i < 2; i = i + 1) { continue; }")
         compile_pipeline("for (let i = 0; i < 2; i = i + 1) { while (True) { break; } }")
 
     def test_for_condition_must_be_bool(self):
-        self.assert_error("for (let i = 0; i; i = i + 1) { }", "'for' condition must be bool")
+        self.assert_error("for (let i = 0; i; i = i + 1) { }", "la condición del 'for' debe ser bool")
 
     def test_for_variable_is_scoped_to_loop(self):
         self.assert_error("for (let i = 0; i < 2; i = i + 1) { } print(i);",
-                          "undefined variable 'i'")
+                          "variable no definida 'i'")
 
     def test_list_type(self):
         analyze = compile_pipeline("let a: list = [1, 2]; print(len(a));")
         self.assertIsNotNone(analyze)
 
     def test_list_cannot_be_assigned_to_int(self):
-        self.assert_error("let a: int = [1, 2];", "cannot assign 'list' to 'int'")
+        self.assert_error("let a: int = [1, 2];", "no se puede asignar 'list' a 'int'")
 
     def test_index_requires_int(self):
-        self.assert_error('let a = [1]; print(a["x"]);', "index must be int")
+        self.assert_error('let a = [1]; print(a["x"]);', "índice debe ser int")
 
     def test_cannot_index_int(self):
-        self.assert_error("let a = 1; print(a[0]);", "cannot index a value of type 'int'")
+        self.assert_error("let a = 1; print(a[0]);", "no se puede indexar un valor de tipo 'int'")
 
     def test_set_index_requires_list(self):
-        self.assert_error("let a: str = \"x\"; a[0] = 1;", "cannot assign to an index of 'str'")
+        self.assert_error("let a: str = \"x\"; a[0] = 1;", "no se puede asignar a un índice de 'str'")
 
     def test_len_requires_str_or_list(self):
-        self.assert_error("print(len(1));", "'len' expects 'str' or 'list'")
+        self.assert_error("print(len(1));", "'len' espera 'str' o 'list'")
 
 
 class LoopAndListIRTests(unittest.TestCase):
@@ -111,7 +111,7 @@ class LoopAndListIRTests(unittest.TestCase):
             "while (True) { break; continue; }"
         )
         gotos = [i for i in ir if i.op == "goto"]
-        self.assertGreaterEqual(len(gotos), 3)  # break, continue, loop back-edge
+        self.assertGreaterEqual(len(gotos), 3)
 
     def test_list_instructions(self):
         _, _, ir = compile_pipeline("let a = [1, 2]; a[0] = a[1]; print(a[0]);")
@@ -126,7 +126,6 @@ class LoopAndListIRTests(unittest.TestCase):
         )
         labels = [i.a for i in ir if i.op == "label"]
         gotos = [i.a for i in ir if i.op == "goto"]
-        # The continue jumps to the update label, which is the second-to-last label.
         self.assertIn(labels[-2], gotos)
 
 
@@ -159,7 +158,7 @@ class LoopAndListInterpreterTests(unittest.TestCase):
 
     def test_index_out_of_range(self):
         _, sym, ir = compile_pipeline("let a = [1]; print(a[3]);")
-        with self.assertRaisesRegex(InterpError, "out of range"):
+        with self.assertRaisesRegex(InterpError, "fuera de rango"):
             Interpreter(ir, sym["globals"]).run()
 
     def test_optimized_loops_and_arrays_match(self):
@@ -196,4 +195,3 @@ class LoopAndListBackendTests(unittest.TestCase):
         )
         prog, _, _ = compile_pipeline(source)
         self.assertEqual(run_python(generate_python(prog)), run_source(source))
-

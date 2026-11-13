@@ -1,13 +1,11 @@
-"""AST node definitions (output of the syntactic phase)."""
 from dataclasses import dataclass, field
 from typing import Optional
 
-# ---- expressions ----
 
 @dataclass
 class Literal:
     value: object
-    lit_type: str  # 'int' | 'float' | 'str' | 'bool' | 'None'
+    lit_type: str
     line: int = 0
     col: int = 0
 
@@ -19,7 +17,7 @@ class Var:
 
 @dataclass
 class BinOp:
-    op: str  # '+','-','*','/','%','==','!=','<','<=','>','>=','and','or'
+    op: str
     left: object
     right: object
     line: int = 0
@@ -27,7 +25,7 @@ class BinOp:
 
 @dataclass
 class UnaryOp:
-    op: str  # '-' | 'not'
+    op: str
     operand: object
     line: int = 0
     col: int = 0
@@ -52,12 +50,11 @@ class Index:
     line: int = 0
     col: int = 0
 
-# ---- statements ----
 
 @dataclass
 class LetStmt:
     name: str
-    ann: Optional[str]  # declared type or None
+    ann: Optional[str]
     expr: object
     line: int = 0
     col: int = 0
@@ -86,9 +83,9 @@ class WhileStmt:
 
 @dataclass
 class ForStmt:
-    init: object        # LetStmt | AssignStmt | ExprStmt
+    init: object
     cond: object
-    update: object      # AssignStmt | ExprStmt
+    update: object
     body: list
     line: int = 0
     col: int = 0
@@ -105,7 +102,7 @@ class ContinueStmt:
 
 @dataclass
 class SetIndexStmt:
-    target: object      # Var
+    target: object
     index: object
     expr: object
     line: int = 0
@@ -113,7 +110,7 @@ class SetIndexStmt:
 
 @dataclass
 class ReturnStmt:
-    expr: object = None  # None => bare `return;`
+    expr: object = None
     line: int = 0
     col: int = 0
 
@@ -125,7 +122,6 @@ class ExprStmt:
 
 @dataclass
 class Block:
-    """Bare `{ ... }` block; opens a new lexical scope."""
     stmts: list
     line: int = 0
     col: int = 0
@@ -133,7 +129,7 @@ class Block:
 @dataclass
 class Param:
     name: str
-    ann: Optional[str]  # None => unchecked (accepts anything)
+    ann: Optional[str]
     line: int = 0
     col: int = 0
 
@@ -141,11 +137,11 @@ class Param:
 class FuncDef:
     name: str
     params: list[Param]
-    ret: str  # 'None' when omitted
+    ret: str
     body: list
     line: int = 0
     col: int = 0
 
 @dataclass
 class Program:
-    items: list  # FuncDef | statement
+    items: list

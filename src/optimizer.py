@@ -1,15 +1,3 @@
-"""Phase 4.5: IR optimizer (optional, enabled with --opt).
-
-Runs a small, safe set of classic TAC optimizations to a fixed point:
-
-* constant folding        `%t1 = 2 + 3`        -> `%t1 = 5`
-* constant propagation    `x = %t1 * 2`        -> `x = 5 * 2` -> `x = 10`
-* constant conditional    `ifFalse True goto L` -> removed
-* unreachable code        instructions after `goto`/`return` up to the next label
-* dead temporaries        `%t1 = ...` never read -> removed
-
-Calls are never removed (they may have side effects such as `print`).
-"""
 from .ir_gen import Instr
 from .interp import Interpreter, InterpError
 
@@ -39,7 +27,6 @@ def _sub(v, consts):
 
 
 def _rewrite_with(ins: Instr, sub) -> Instr:
-    """Rebuild an instruction applying `sub` to every read operand."""
     new = Instr(ins.op, ins.a, ins.b, ins.c)
     new.extra = ins.extra
     if ins.op == "assign":
@@ -62,12 +49,10 @@ def _rewrite_with(ins: Instr, sub) -> Instr:
 
 
 def _rewrite(ins: Instr, consts: dict) -> Instr:
-    """Replace operands that hold a known constant. Destinations are kept."""
     return _rewrite_with(ins, lambda v: _sub(v, consts))
 
 
 def fold_constants(code: list[Instr]) -> list[Instr]:
-    """Fold constant operations and forward-propagate constant temporaries."""
     consts: dict = {}
     out: list[Instr] = []
     for ins in code:
@@ -79,7 +64,7 @@ def fold_constants(code: list[Instr]) -> list[Instr]:
                     ins.c, const_value(ins.b), const_value(ins.extra)
                 )
             except InterpError:
-                pass  # leave it for runtime (e.g. division by zero)
+                pass
             else:
                 ins = Instr("assign", ins.a, encode(val))
         elif ins.op == "unop" and is_const(ins.b):
@@ -95,19 +80,14 @@ def fold_constants(code: list[Instr]) -> list[Instr]:
 
         if ins.op == "ifFalse" and is_const(ins.a):
             if const_value(ins.a):
-                continue  # condition always true -> fall through
-            ins = Instr("goto", ins.b)  # condition always false -> jump
+                continue
+            ins = Instr("goto", ins.b)
 
         out.append(ins)
     return out
 
 
 def remove_unreachable(code: list[Instr]) -> list[Instr]:
-    """Remove instructions that no control-flow path can reach.
-
-    Every function body is a root (it may be called at any time), top-level
-    code starts at index 0, and `ifFalse`/`goto` add their label as an edge.
-    """
     if not code:
         return code
     labels = {ins.a: i for i, ins in enumerate(code) if ins.op == "label"}
@@ -122,10 +102,10 @@ def remove_unreachable(code: list[Instr]) -> list[Instr]:
     roots = [0]
     for i, ins in enumerate(code):
         if ins.op == "func_begin":
-            roots.append(i)          # keep the marker itself
-            roots.append(i + 1)      # body entry
+            roots.append(i)
+            roots.append(i + 1)
             if i in func_end:
-                roots.append(func_end[i])  # always keep its matching func_end
+                roots.append(func_end[i])
 
     reachable: set[int] = set()
     work = list(roots)
@@ -141,9 +121,9 @@ def remove_unreachable(code: list[Instr]) -> list[Instr]:
             work.append(labels.get(ins.b, i + 1))
             work.append(i + 1)
         elif ins.op in ("return", "func_end"):
-            pass  # no fallthrough
+            pass
         elif ins.op == "func_begin":
-            work.append(func_end.get(i, i + 1) + 1)  # sequential skip
+            work.append(func_end.get(i, i + 1) + 1)
         else:
             work.append(i + 1)
 
@@ -151,13 +131,11 @@ def remove_unreachable(code: list[Instr]) -> list[Instr]:
 
 
 def remove_dead_temps(code: list[Instr]) -> list[Instr]:
-    """Drop definitions of temporaries that are never read."""
     changed = True
     while changed:
         changed = False
         used: set = set()
         for ins in code:
-            # Reads live in b/c/extra (for `call` and `list`, b is a list).
             for operand in (ins.b, ins.c, ins.extra):
                 values = operand if isinstance(operand, list) else [operand]
                 for v in values:
@@ -180,13 +158,6 @@ def remove_dead_temps(code: list[Instr]) -> list[Instr]:
 
 
 def propagate_variables(code: list[Instr]) -> list[Instr]:
-    """Propagate constants through variables assigned exactly once.
-
-    A variable with a single static assignment to a constant always holds that
-    value at every read (including inside loops), so every read can be replaced
-    by the constant. This is the variable-level counterpart of the temporary
-    propagation done by `fold_constants`.
-    """
     assignments: dict[str, int] = {}
     for ins in code:
         if ins.op in ("assign", "binop", "unop", "call") and isinstance(ins.a, str):
@@ -212,7 +183,6 @@ def propagate_variables(code: list[Instr]) -> list[Instr]:
 
 
 def find_loops(code: list[Instr]) -> list[tuple[int, int]]:
-    """Return (header, back-edge) index pairs, innermost loops first."""
     labels = {ins.a: i for i, ins in enumerate(code) if ins.op == "label"}
     backedges: dict[int, int] = {}
     for i, ins in enumerate(code):
@@ -228,17 +198,10 @@ def find_loops(code: list[Instr]) -> list[tuple[int, int]]:
 
 
 def hoist_loop_invariants(code: list[Instr], global_names=None) -> list[Instr]:
-    """Loop-invariant code motion for pure `binop`/`unop` instructions.
-
-    Division and modulo are not hoisted because they may raise at runtime.
-    Instructions are only moved when all their operands are constants or
-    variables/temporaries not modified inside the loop. A call to a user
-    function may mutate globals, so global operands are treated as modified.
-    """
     loops = find_loops(code)
     if not loops:
         return code
-    header, backedge = loops[0]  # innermost loop
+    header, backedge = loops[0]
     body = range(header + 1, backedge)
 
     assigned: set[str] = set()
@@ -254,11 +217,10 @@ def hoist_loop_invariants(code: list[Instr], global_names=None) -> list[Instr]:
                 if is_temp(ins.a):
                     temp_def[ins.a] = k
         elif ins.op == "setindex" and isinstance(ins.a, str):
-            assigned.add(ins.a)  # list mutation
+            assigned.add(ins.a)
 
     if user_call:
         if global_names is None:
-            # No symbol information: any variable could be a global.
             assigned |= {
                 ins.b for ins in code[header:backedge + 1]
                 if isinstance(ins.b, str) and not ins.b.startswith(("@", "%"))

@@ -46,11 +46,11 @@ class LexerTests(unittest.TestCase):
         self.assertEqual(toks[3].type, T.IDENT)
 
     def test_unexpected_character(self):
-        with self.assertRaisesRegex(LexError, r"1:1: unexpected character"):
+        with self.assertRaisesRegex(LexError, r"1:1: carácter no reconocido"):
             Lexer("@").tokenize()
 
     def test_unterminated_string(self):
-        with self.assertRaisesRegex(LexError, "unterminated string"):
+        with self.assertRaisesRegex(LexError, "cadena sin cerrar"):
             Lexer('"abc').tokenize()
 
 

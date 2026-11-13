@@ -24,7 +24,6 @@ class IRTests(unittest.TestCase):
         self.assertTrue(all(t[1:2] in ("t", "L") for t in temps))
 
     def test_user_variable_named_like_old_temp_is_safe(self):
-        # Regression: `t1` used to collide with generated temporaries.
         ir = generate("let t1 = 5; print(t1 + 1);")
         self.assertIn("t1", [i.a for i in ir if i.op == "assign"])
         self.assertNotIn("t2", [i.a for i in ir if i.op == "assign"])

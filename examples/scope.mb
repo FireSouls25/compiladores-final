@@ -1,4 +1,4 @@
-# scope.mb - block scoping, else-if and global state
+# scope.mb - ámbitos de bloque, else if y estado global
 let counter: int = 0;
 
 fn bump() {
@@ -17,7 +17,7 @@ fn grade(n: int) -> str {
 
 let x: int = 1;
 if (True) {
-  let x: int = 2;      # shadows the outer x inside this block
+  let x: int = 2;      # sombrea a la x externa solo dentro de este bloque
   print(x);
 }
 print(x);

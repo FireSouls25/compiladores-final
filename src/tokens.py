@@ -1,8 +1,6 @@
-"""MiniB tokens."""
 from dataclasses import dataclass
 from typing import Any
 
-# Token types (plain strings to keep dumps readable)
 FN = "FN"
 LET = "LET"
 IF = "IF"

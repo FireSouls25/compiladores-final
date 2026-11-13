@@ -1,8 +1,3 @@
-"""Phase 5: IR interpreter (iterative evaluation of the TAC).
-
-The evaluator keeps an explicit call stack, so deep recursion in the source
-language does not consume Python's recursion limit.
-"""
 import builtins
 
 from .ir_gen import Instr
@@ -13,24 +8,26 @@ class InterpError(Exception):
 
 
 def decode(op):
-    """Decode an IR string constant (`@text` -> `text`)."""
     if isinstance(op, str) and op.startswith("@"):
         return op[1:]
     return op
 
 
 class Interpreter:
-    def __init__(self, code: list[Instr], global_names=None):
+    def __init__(self, code: list[Instr], global_names=None, traza=None):
+        self.traza = traza
+        self.marcos: list[str] = ["main"]
+        self.profundidad_max = 1
+        self.reservas_heap = 0
         self.code = code
         self.global_names = set(global_names or ())
         self.labels: dict[str, int] = {}
         self.funcs: dict[str, dict] = {}
-        self.globals: dict = {}  # frame 0
+        self.globals: dict = {}
         for i, ins in enumerate(code):
             if ins.op == "label":
                 self.labels[ins.a] = i
             elif ins.op == "func_begin":
-                # Functions are not nested: the first func_end closes this one.
                 j = i + 1
                 while j < len(code) and code[j].op != "func_end":
                     j += 1
@@ -42,7 +39,7 @@ class Interpreter:
 
     def run(self):
         frames: list[dict] = [self.globals]
-        call_stack: list[tuple[int, str | None]] = []  # (return pc, dest temp)
+        call_stack: list[tuple[int, str | None]] = []
         pc = 0
 
         def lookup(name):
@@ -50,12 +47,9 @@ class Interpreter:
                 return frames[-1][name]
             if name in self.globals:
                 return self.globals[name]
-            raise InterpError(f"runtime: undefined variable '{name}'")
+            raise InterpError(f"variable no definida '{name}'")
 
         def store(name, val):
-            # Inside a function, locals live in the top frame; writing an
-            # existing global mutates the global. At top level frame 0 *is*
-            # the globals dict.
             if len(frames) > 1 and name not in self.globals:
                 frames[-1][name] = val
             else:
@@ -64,16 +58,15 @@ class Interpreter:
         def value_of(operand):
             if isinstance(operand, str):
                 if operand.startswith("@"):
-                    return operand[1:]          # string constant
-                return lookup(operand)          # variable or %temp
-            return operand                      # int / float / bool / None
+                    return operand[1:]
+                return lookup(operand)
+            return operand
 
         while pc < len(self.code):
             ins = self.code[pc]
             op = ins.op
 
             if op == "func_begin":
-                # Sequential execution skips bodies; calls jump to entry.
                 pc = self.funcs[ins.a]["end"] + 1
                 continue
 
@@ -97,6 +90,8 @@ class Interpreter:
 
             elif op == "list":
                 frames[-1][ins.a] = [value_of(x) for x in (ins.b or [])]
+                self.reservas_heap += 1
+                self.log(f"[HEAP] reservada una lista de {len(frames[-1][ins.a])} elemento(s) (id {id(frames[-1][ins.a]) % 0x10000:#06x})")
                 pc += 1
 
             elif op == "index":
@@ -120,26 +115,28 @@ class Interpreter:
             elif op == "return":
                 val = value_of(ins.a) if ins.a is not None else None
                 if not call_stack:
-                    raise InterpError("runtime: 'return' outside function")
+                    raise InterpError("'return' fuera de una función")
                 ret_pc, dest = call_stack.pop()
                 frames.pop()
+                self.log(f"[STACK] pop  marco '{self.marcos[-1]}' → retorna {val!r}")
+                self.marcos.pop()
                 if dest is not None:
                     frames[-1][dest] = val
                 pc = ret_pc
 
             elif op == "func_end":
-                # Falling off a function returns None (void functions only;
-                # semantic analysis guarantees non-void functions return).
                 if not call_stack:
-                    raise InterpError("runtime: fell off a function without caller")
+                    raise InterpError("fin de función sin llamador")
                 ret_pc, dest = call_stack.pop()
                 frames.pop()
+                self.log(f"[STACK] pop  marco '{self.marcos[-1]}' → retorna None")
+                self.marcos.pop()
                 if dest is not None:
                     frames[-1][dest] = None
                 pc = ret_pc
 
             else:
-                raise InterpError(f"runtime: unknown op {op!r}")
+                raise InterpError(f"operación desconocida {op!r}")
 
         return self.globals
 
@@ -151,7 +148,7 @@ class Interpreter:
             return pc + 1
         if name == "len":
             if len(args) != 1 or not isinstance(args[0], (str, list)):
-                raise InterpError("runtime: len() expects 1 str or list")
+                raise InterpError("len() espera 1 valor str o list")
             if dest is not None:
                 frames[-1][dest] = len(args[0])
             return pc + 1
@@ -165,37 +162,45 @@ class Interpreter:
                 frames[-1][dest] = s
             return pc + 1
         if name not in self.funcs:
-            raise InterpError(f"runtime: undefined function '{name}'")
+            raise InterpError(f"función no definida '{name}'")
         fn = self.funcs[name]
         if len(args) != len(fn["params"]):
             raise InterpError(
-                f"runtime: '{name}' expects {len(fn['params'])} args, got {len(args)}"
+                f"'{name}' espera {len(fn['params'])} argumentos, se obtuvieron {len(args)}"
             )
         call_stack.append((pc + 1, dest))
         frames.append(dict(zip(fn["params"], args)))
+        self.marcos.append(name)
+        self.profundidad_max = max(self.profundidad_max, len(self.marcos))
+        locales = ", ".join(f"{k}={v!r}" for k, v in frames[-1].items())
+        self.log(f"[STACK] push marco '{name}' ({locales}) · profundidad {len(self.marcos)}")
         return fn["entry"]
+
+    def log(self, msg: str):
+        if self.traza is not None:
+            self.traza("  " * (len(self.marcos) - 1) + msg)
 
     @staticmethod
     def get_index(obj, idx):
         if not isinstance(obj, (list, str)):
-            raise InterpError("runtime: cannot index a non-list/non-str value")
+            raise InterpError("no se puede indexar un valor que no es list ni str")
         if not isinstance(idx, int) or isinstance(idx, bool):
-            raise InterpError("runtime: index must be int")
+            raise InterpError("el índice debe ser int")
         try:
             return obj[idx]
         except IndexError:
-            raise InterpError(f"runtime: index {idx} out of range")
+            raise InterpError(f"índice {idx} fuera de rango")
 
     @staticmethod
     def set_index(obj, idx, val):
         if not isinstance(obj, list):
-            raise InterpError("runtime: cannot assign to an index of a non-list value")
+            raise InterpError("no se puede asignar a un índice de un valor que no es list")
         if not isinstance(idx, int) or isinstance(idx, bool):
-            raise InterpError("runtime: index must be int")
+            raise InterpError("el índice debe ser int")
         try:
             obj[idx] = val
         except IndexError:
-            raise InterpError(f"runtime: index {idx} out of range")
+            raise InterpError(f"índice {idx} fuera de rango")
 
     @staticmethod
     def apply_binop(op, l, r):
@@ -227,10 +232,10 @@ class Interpreter:
             if op == "or":
                 return l or r
         except ZeroDivisionError:
-            raise InterpError("runtime: division by zero")
+            raise InterpError("división por cero")
         except TypeError as e:
-            raise InterpError(f"runtime: bad operands for '{op}': {e}")
-        raise InterpError(f"runtime: unknown operator {op!r}")
+            raise InterpError(f"operandos inválidos para '{op}': {e}")
+        raise InterpError(f"operador desconocido {op!r}")
 
     @staticmethod
     def apply_unop(op, v):
@@ -238,7 +243,7 @@ class Interpreter:
             try:
                 return -v
             except TypeError:
-                raise InterpError(f"runtime: unary '-' requires a number, got {v!r}")
+                raise InterpError(f"el '-' unario requiere un número, se obtuvo {v!r}")
         if op == "not":
             return not v
-        raise InterpError(f"runtime: unknown unary {op!r}")
+        raise InterpError(f"operador unario desconocido {op!r}")

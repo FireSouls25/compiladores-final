@@ -38,7 +38,7 @@ class OptimizerTests(unittest.TestCase):
         self.assertIn("binop", opcodes(ir))
         _, sym, ir = compile_pipeline("let x = 1 / 0;", opt=True)
         from src.interp import Interpreter
-        with self.assertRaisesRegex(InterpError, "division by zero"):
+        with self.assertRaisesRegex(InterpError, "división por cero"):
             Interpreter(ir, sym["globals"]).run()
 
     def test_optimizer_is_idempotent(self):
@@ -118,7 +118,6 @@ class AdvancedOptimizerTests(unittest.TestCase):
         self.assertGreater(div, header)
 
     def test_user_call_does_not_invalidate_parameters(self):
-        # `print(a + b)` can still be hoisted: parameters cannot change.
         source = (
             "fn f(a: int, b: int) { let i = 0; "
             "while (i < 2) { print(a + b); i = i + 1; } } f(1, 2);"
@@ -131,7 +130,6 @@ class AdvancedOptimizerTests(unittest.TestCase):
             "fn f() { let i = 0; while (i < 2) { print(g + 1); change(); i = i + 1; } } "
             "f();"
         )
-        # If `g + 1` were hoisted, the output would be 2, 2.
         self.assertEqual(run_source(source, opt=True), "2\n3\n")
 
 

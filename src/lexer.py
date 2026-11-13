@@ -1,4 +1,3 @@
-"""Phase 1: Lexer (lexical analysis). Source text -> list[Token]."""
 from . import tokens as T
 from .tokens import Token
 
@@ -9,7 +8,6 @@ class LexError(Exception):
 
 class Lexer:
     def __init__(self, source: str):
-        # Tolerate a UTF-8 BOM (common on Windows editors).
         if source.startswith("\ufeff"):
             source = source[1:]
         self.src = source
@@ -19,8 +17,8 @@ class Lexer:
         self.col = 1
         self.toks: list[Token] = []
 
-    def error(self, msg: str) -> LexError:
-        return LexError(f"{self.line}:{self.col}: {msg}")
+    def error(self, msg: str, line=None, col=None) -> LexError:
+        return LexError(f"{line or self.line}:{col or self.col}: {msg}")
 
     def peek(self) -> str:
         return self.src[self.i] if self.i < self.n else "\0"
@@ -66,7 +64,7 @@ class Lexer:
         while self.peek().isdigit():
             self.advance()
         if self.peek() == "." and self.peek2().isdigit():
-            self.advance()  # consume '.'
+            self.advance()
             while self.peek().isdigit():
                 self.advance()
             lex = self.src[start:self.i]
@@ -90,19 +88,19 @@ class Lexer:
         buf: list[str] = []
         while True:
             if self.i >= self.n:
-                raise self.error("unterminated string literal")
+                raise self.error("cadena sin cerrar: falta la comilla de cierre", line, col)
             ch = self.advance()
             if ch == quote:
                 break
             if ch == "\\":
                 if self.i >= self.n:
-                    raise self.error("unterminated string escape")
+                    raise self.error("secuencia de escape sin terminar")
                 e = self.advance()
                 buf.append({"n": "\n", "t": "\t", "r": "\r",
                             "\\": "\\", "'": "'", '"': '"',
                             "0": "\0"}.get(e, e))
             elif ch == "\n":
-                raise self.error("unterminated string literal (newline)")
+                raise self.error("cadena sin cerrar: la línea termina antes de la comilla de cierre", line, col)
             else:
                 buf.append(ch)
         self.add(T.STRING_LIT, quote + "".join(buf) + quote, "".join(buf), line, col)
@@ -132,5 +130,5 @@ class Lexer:
             self.add(single[ch], ch, ch, line, col)
             return
         if ch == "!":
-            raise self.error("unexpected '!' (did you mean '!='?)")
-        raise self.error(f"unexpected character {ch!r}")
+            raise self.error("carácter inesperado '!' (¿quisiste decir '!='?)")
+        raise self.error(f"carácter no reconocido {ch!r}: no pertenece al alfabeto de MiniB")

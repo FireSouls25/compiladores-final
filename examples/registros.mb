@@ -1,0 +1,18 @@
+# Expresión con muchos temporales vivos a la vez.
+# Con 3 registros (R0..R2) el generador de código objetivo debe hacer SPILL.
+# Prueba: python -m src examples/registros.mb --fases
+#         python -m src examples/registros.mb --emit-asm --registros 4
+
+let a = 1;
+let b = 2;
+let c = 3;
+let d = 4;
+let e = 5;
+let f = 6;
+let g = 7;
+let h = 8;
+let i = 9;
+let j = 10;
+
+let r = ((a + b) * (c + d)) + ((e + f) * ((g + h) * (i + j)));
+print(r);

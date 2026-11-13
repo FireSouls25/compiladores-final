@@ -1,9 +1,3 @@
-"""Phase 4: IR generation. Typed/resolved AST -> Three-Address Code (TAC).
-
-Temporaries are `%tN` and labels `%LN`. Neither prefix can appear in a MiniB
-identifier (the lexer only accepts letters, digits and `_`), so generated names
-can never collide with user variables.
-"""
 from dataclasses import dataclass, field
 from typing import Any
 from . import ast_nodes as A
@@ -55,7 +49,7 @@ class Instr:
 
 def fmt(v) -> str:
     if isinstance(v, str) and v.startswith("@"):
-        return repr(v[1:])  # string constant -> quoted
+        return repr(v[1:])
     if isinstance(v, str):
         return v
     if v is True:
@@ -70,14 +64,12 @@ def fmt(v) -> str:
 
 
 def const(v) -> str:
-    """Encode a Python constant as an IR operand."""
     if isinstance(v, str):
-        return "@" + v  # '@' prefix marks string constants
+        return "@" + v
     return v
 
 
 def var_name(node) -> str:
-    """Resolved (scope-safe) name of a declaration/assignment."""
     return getattr(node, "resolved_name", None) or getattr(node, "resolved", None) or node.name
 
 
@@ -109,10 +101,9 @@ class IRGenerator:
         return self.code
 
     def gen_func(self, fn: A.FuncDef):
-        self.emit(Instr("func_begin", fn.name, None, [p.name for p in fn.params]))
+        self.emit(Instr("func_begin", fn.name, None, [getattr(p, "resolved", p.name) for p in fn.params]))
         for s in fn.body:
             self.gen_stmt(s, is_top=False)
-        # implicit return None for void functions
         if fn.ret == "None":
             self.emit(Instr("return", None))
         self.emit(Instr("func_end", fn.name))

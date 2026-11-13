@@ -32,8 +32,10 @@ fuente .mb
 | `src/ir_gen.py` | 4. IR | AST → código de tres direcciones (TAC) |
 | `src/optimizer.py` | 4.5 Optimización | Plegado de constantes, propagación, código muerto |
 | `src/interp.py` | 5. Ejecución | Intérprete iterativo del TAC |
-| `src/py_codegen.py` | 6. Backend | AST resuelto → programa Python 3 ejecutable |
-| `src/diagnostics.py` | — | Errores con `archivo:línea:columna` y fragmento de código |
+| `src/asm_gen.py` | 6. Código objetivo | TAC → ensamblador simulado: registros R0..Rn, spill/LOAD, marcos de pila |
+| `src/py_codegen.py` | 6. Backend alterno | AST resuelto → programa Python 3 ejecutable |
+| `src/fases.py` | — | Modo `--fases`: narra paso a paso lo que hace cada fase |
+| `src/diagnostics.py` | — | Errores con `archivo:línea:columna`, tipo de error y fragmento de código |
 | `src/__main__.py` | — | CLI (`python -m src`) |
 
 ## Gramática (EBNF)
@@ -108,8 +110,17 @@ Requiere Python 3.10 o superior. No hay dependencias para ejecutar el compilador
 # Ejecutar un programa
 python -m src examples\hello.mb
 
-# Ver cada fase
+# Ver cómo trabaja cada fase, paso a paso (tokens, AST, ámbitos y tipos,
+# cuádruplas, registros/spill, stack y heap en ejecución)
+python -m src examples\hello.mb --fases
+python -m src examples\registros.mb --fases --opt
+
+# Volcados crudos de cada fase
 python -m src examples\fib.mb --dump-tokens --dump-ast --dump-ir --no-run
+
+# Ensamblador simulado (por defecto 3 registros)
+python -m src examples\registros.mb --emit-asm
+python -m src examples\registros.mb --emit-asm --registros 4
 
 # Optimizar antes de ejecutar y ver el TAC resultante
 python -m src examples\misc.mb --opt --dump-ir
@@ -156,6 +167,26 @@ call print(%t2)
 call print(14)
 ```
 
+### Código objetivo (ensamblador simulado)
+
+`--emit-asm` traduce el TAC a un ensamblador didáctico. No se ejecuta en hardware
+real: simula las decisiones del back-end de la Semana 10.
+
+- **Selección de instrucciones:** `ADD`, `SUB`, `MUL`, `DIV`, `SLT`, `CMP`/`JE`, `JMP`, `CALL`/`RET`, `CONCAT`...
+- **Asignación de registros:** cada temporal `%tN` recibe el primer registro libre;
+  al terminar su vida útil (*liveness*) el registro se libera y se reutiliza.
+- **Spill:** si no quedan registros, se expulsa el temporal cuyo próximo uso está
+  más lejos (`STORE Rk, [SP+n]`) y se recarga cuando vuelve a usarse (`LOAD`).
+- **Memoria:** globales en `.data`; parámetros en `[FP+8]...` y locales en `[FP-4]...`
+  dentro del marco de pila (`PUSH FP / MOV FP, SP ... MOV SP, FP / POP FP / RET`);
+  las listas se reservan en el heap con `ALLOC`.
+
+```text
+    STORE R0, [SP+0]              ; spill de %t3
+    ...
+    LOAD R1, [SP+0]               ; recarga %t3
+```
+
 ### Backend Python
 
 `--emit-py` traduce el AST ya resuelto a Python 3. El código generado es
@@ -169,17 +200,20 @@ Python.
 Los errores de compilación muestran el archivo, la posición y la línea exacta:
 
 ```text
-examples\error.mb:2:1: error: cannot assign 'str' to 'int' in 'let x'
-   2 > let x: int = "oops";
+examples\error.mb:2:1: error semántico: no se puede asignar 'str' a 'int' en 'let x'
+   2 > let x: int = "ups";
        ^
 ```
 
+Cada mensaje indica la fase que lo detectó: `error léxico`, `error sintáctico`,
+`error semántico` o `error de ejecución`.
+
 La fase semántica reporta **todos** los errores que encuentra, no solo el primero.
-Los errores de ejecución se reportan como `runtime error` (por ejemplo, división
-por cero). Los nombres mal escritos incluyen una sugerencia:
+Los errores de ejecución se reportan como `error de ejecución` (por ejemplo,
+división por cero). Los nombres mal escritos incluyen una sugerencia:
 
 ```text
-examples\typo.mb:3:7: error: undefined variable 'cuonter' (did you mean 'counter'?)
+examples\typo.mb:3:7: error semántico: variable no definida 'cuonter' (¿quisiste decir 'counter'?)
 ```
 
 ## Pruebas
@@ -203,6 +237,7 @@ sugerencias y CLI (130+ casos, incluidos los ejemplos completos).
 | `examples/scope.mb` | shadowing, `else if`, estado global |
 | `examples/loops.mb` | `for`, `break`, `continue`, bucles anidados |
 | `examples/arrays.mb` | listas, índices, mutación, `len` |
+| `examples/registros.mb` | presión de registros: provoca spill con 3 registros |
 | `examples/error.mb` | diagnóstico semántico |
 | `examples/typo.mb` | sugerencia por nombre mal escrito |
 
@@ -212,5 +247,6 @@ sugerencias y CLI (130+ casos, incluidos los ejemplos completos).
   se accede con índice y `len`.
 - El optimizador no hace análisis interprocedimental: una llamada a una función
   dentro de un bucle impide mover invariantes que dependan de globales.
-- El backend genera Python; un siguiente paso natural es generar C o LLVM IR.
+- El ensamblador es simulado (no se ensambla ni se ejecuta); la asignación de
+  registros es local y lineal, no por coloreado de grafos (Chaitin-Briggs).
 - No hay ejecución de ambos caminos ni verificación formal de tipos.
